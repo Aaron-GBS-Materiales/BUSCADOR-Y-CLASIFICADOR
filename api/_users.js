@@ -57,7 +57,13 @@ async function getUser(username) {
   if (!username) return null;
   const key = USER_PREFIX + username.trim().toLowerCase();
   const data = await kv.get(key);
-  return data || null;
+  if (!data) return null;
+  // Algunos clientes de KV devuelven el valor ya parseado como objeto, otros
+  // como string JSON crudo. Manejamos ambos casos explícitamente.
+  if (typeof data === 'string') {
+    try { return JSON.parse(data); } catch (e) { return null; }
+  }
+  return data;
 }
 
 async function userExists(username) {
