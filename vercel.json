@@ -1,0 +1,6 @@
+{
+  "name": "clasificador-unspsc",
+  "version": "1.0.0",
+  "description": "Clasificador UNSPSC con base precargada y motor de clasificación semántica",
+  "private": true
+}
