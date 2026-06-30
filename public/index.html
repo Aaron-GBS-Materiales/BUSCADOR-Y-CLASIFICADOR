@@ -308,6 +308,52 @@
   }
   .api-status-pill.ok { background: rgba(34,197,94,.12); color: var(--success); border-color: rgba(34,197,94,.3); }
 
+  /* ═══ LOGIN ═══ */
+  .login-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    background: rgba(12,14,20,.92);
+    backdrop-filter: blur(6px);
+    display:flex; align-items:center; justify-content:center;
+    padding: 20px;
+  }
+  .login-card {
+    width: 100%; max-width: 360px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px 28px;
+    text-align: center;
+  }
+  .login-logo {
+    width:48px; height:48px; margin:0 auto 16px;
+    border-radius:12px;
+    background: linear-gradient(135deg, var(--accent), var(--teal));
+    display:flex; align-items:center; justify-content:center;
+    font-weight:800; font-size:20px; color:#0c0e14;
+  }
+  .login-logo span { opacity:.6; }
+  .login-card h2 { font-size:18px; margin-bottom:6px; }
+  .login-sub { font-size:12.5px; color:var(--text-dim); margin-bottom:22px; line-height:1.5; }
+  .login-label { display:block; text-align:left; font-size:11px; font-weight:700; color:var(--text-dim); margin:12px 0 6px; }
+  .login-input {
+    width:100%; background:var(--surface2); border:1px solid var(--border);
+    border-radius:9px; padding:11px 13px; color:var(--text);
+    font-family:var(--sans); font-size:13.5px; outline:none; transition:border-color .2s;
+  }
+  .login-input:focus { border-color:var(--accent); }
+  .login-error {
+    margin-top:14px; font-size:12px; color:var(--danger);
+    background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3);
+    border-radius:8px; padding:9px 12px; text-align:left;
+  }
+  .session-row {
+    display:flex; align-items:center; justify-content:space-between;
+    background: var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:10px 16px; margin-bottom:14px;
+    font-size:12.5px; color:var(--text-dim);
+  }
+  .session-row strong { color: var(--text); }
+
   @media (max-width:860px) {
     .bulk-grid { grid-template-columns:1fr; }
     .app { padding:16px 14px 50px; }
@@ -330,26 +376,25 @@
 
 <div class="app">
 
-  <!-- ═══ SELECTOR DE MOTOR (solo visible con ?admin=true en la URL) ═══ -->
-  <div class="engine-row" id="engineRow" style="display:none;">
-    <span class="engine-label">Motor de clasificación:</span>
-    <div class="engine-toggle">
-      <button class="engine-opt active" id="engineLocal" onclick="setEngine('local')">⚡ Local · Gratis</button>
-      <button class="engine-opt" id="engineIA" onclick="setEngine('ia')">🧠 IA Claude · Requiere API key</button>
+  <!-- ═══ LOGIN (bloquea el uso hasta autenticarse) ═══ -->
+  <div class="login-overlay" id="loginOverlay">
+    <div class="login-card">
+      <div class="login-logo">U<span>.</span></div>
+      <h2>Acceso restringido</h2>
+      <p class="login-sub">Ingresa tus credenciales para usar el clasificador con IA.</p>
+      <label class="login-label">Usuario</label>
+      <input type="text" id="loginUser" class="login-input" autocomplete="username" placeholder="usuario">
+      <label class="login-label">Contraseña</label>
+      <input type="password" id="loginPass" class="login-input" autocomplete="current-password" placeholder="••••••••">
+      <button class="btn primary" id="loginBtn" style="width:100%; margin-top:14px;" onclick="doLogin()">Ingresar</button>
+      <div class="login-error" id="loginError" style="display:none;"></div>
     </div>
-    <span class="engine-desc" id="engineDesc">Sin costo · sin internet · resultados instantáneos por similitud semántica con sinónimos</span>
   </div>
 
-  <!-- ═══ CONFIGURACIÓN API (privada · solo modo admin ?admin=true) ═══ -->
-  <div class="api-card" id="apiCard" style="display:none;">
-    <span class="api-label">🔑 API Key de Anthropic</span>
-    <input type="password" class="api-input" id="apiKeyInput" placeholder="sk-ant-api03-..." autocomplete="off">
-    <button class="btn ghost" style="padding:10px 16px;" onclick="saveApiKey()">Guardar</button>
-    <span class="api-status-pill" id="apiStatusPill">Sin configurar</span>
-    <div class="api-note">
-      Panel privado de administración (no visible para el público). Para fijar la clave de forma permanente, edítala en el código (constante <code>CONFIGURED_API_KEY</code>). Lo que guardes aquí queda solo en este navegador (localStorage) y nunca se envía a otro servidor que no sea api.anthropic.com.
-      Obtén tu clave en <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
-    </div>
+  <!-- ═══ BARRA DE SESIÓN (usuario autenticado) ═══ -->
+  <div class="session-row" id="sessionRow" style="display:none;">
+    <span>👤 Sesión: <strong id="sessionUserLabel"></strong></span>
+    <button class="btn ghost" style="padding:6px 14px; font-size:13px;" onclick="doLogout()">Cerrar sesión</button>
   </div>
 
   <!-- ═══ TABS ═══ -->
@@ -820,13 +865,12 @@ FORMATO DE RESPUESTA — responde ÚNICAMENTE con JSON válido, sin markdown, si
 - "code": debe existir EXACTAMENTE en la lista de candidatos del material correspondiente.`;
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SELECTOR DE MOTOR
+   MOTOR DE CLASIFICACIÓN — único: IA (vía proxy autenticado), sin selector
 ═══════════════════════════════════════════════════════════════════════════ */
-let ENGINE = 'local';
-try { ENGINE = localStorage.getItem('unspsc_engine') || 'local'; } catch(e) {}
+const ENGINE = 'ia';
 
 // ¿Estamos dentro de Claude.ai (artifact/vista previa)?
-// Ahí las llamadas a la API van por la plataforma y NO se necesita API key.
+// Ahí las llamadas a la API van por la plataforma y no requieren login propio.
 const IN_CLAUDE = (() => {
   try {
     const h = location.hostname || '';
@@ -834,34 +878,77 @@ const IN_CLAUDE = (() => {
   } catch(e) { return false; }
 })();
 
-// Proxy serverless: la clave vive en una variable de entorno del servidor
-// (ANTHROPIC_API_KEY en Vercel) y NUNCA llega al navegador. El motor IA llama
-// a esta ruta del mismo sitio en lugar de a api.anthropic.com directamente.
+// Proxy serverless autenticado: valida la sesión (cookie) y, si es válida,
+// añade la clave de Anthropic (variable de entorno del servidor) y reenvía.
 const API_PROXY = '/api/clasificar';
-// El proxy solo existe en el despliegue web (http/https), no en archivo local.
-const HAS_PROXY = (() => { try { return !IN_CLAUDE && /^https?:$/.test(location.protocol); } catch(e) { return false; } })();
+const LOGIN_ENDPOINT = '/api/login';
+const LOGOUT_ENDPOINT = '/api/logout';
 
-function setEngine(mode) {
-  ENGINE = mode;
-  try { localStorage.setItem('unspsc_engine', mode); } catch(e) {}
-  document.getElementById('engineLocal').classList.toggle('active', mode === 'local');
-  document.getElementById('engineIA').classList.toggle('active', mode === 'ia');
-  // El panel de API key NUNCA se muestra al público: solo en modo admin (?admin=true).
-  // Con proxy en el servidor tampoco hace falta clave en el navegador.
-  const _isAdmin = (() => { try { return new URLSearchParams(location.search).get('admin') === 'true'; } catch(e) { return false; } })();
-  document.getElementById('apiCard').style.display = (_isAdmin && mode === 'ia' && !IN_CLAUDE && !HAS_PROXY) ? 'flex' : 'none';
-  document.getElementById('engineDesc').textContent = mode === 'local'
-    ? 'Sin costo · sin internet · resultados instantáneos por similitud semántica con sinónimos'
-    : (IN_CLAUDE
-        ? 'Máxima precisión semántica · incluido en tu suscripción de Claude (sin API key)'
-        : (HAS_PROXY
-            ? 'Máxima precisión semántica · la clave se resuelve de forma segura en el servidor'
-            : 'Máxima precisión semántica · consume créditos de tu cuenta Anthropic'));
-  // Etiqueta del botón IA según entorno
-  document.getElementById('engineIA').innerHTML = (IN_CLAUDE || HAS_PROXY)
-    ? '🧠 IA Claude · Seguro'
-    : '🧠 IA Claude · Requiere API key';
+let SESSION_USER = null; // nombre del usuario autenticado, o null
+
+function showLogin(message) {
+  document.getElementById('loginOverlay').style.display = 'flex';
+  document.getElementById('sessionRow').style.display = 'none';
+  const err = document.getElementById('loginError');
+  if (message) { err.textContent = message; err.style.display = 'block'; }
+  else { err.style.display = 'none'; }
 }
+
+function showApp(username) {
+  SESSION_USER = username;
+  document.getElementById('loginOverlay').style.display = 'none';
+  document.getElementById('sessionRow').style.display = 'flex';
+  document.getElementById('sessionUserLabel').textContent = username;
+}
+
+async function doLogin() {
+  const user = document.getElementById('loginUser').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  if (!user || !pass) { showLogin('Ingresa usuario y contraseña.'); return; }
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true; btn.textContent = 'Verificando…';
+  try {
+    const res = await fetch(LOGIN_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ user, pass })
+    });
+    if (res.ok) {
+      showApp(user);
+    } else {
+      const data = await res.json().catch(() => ({}));
+      showLogin(data.error?.message || 'Usuario o contraseña incorrectos.');
+    }
+  } catch (e) {
+    showLogin('No se pudo contactar el servidor de autenticación.');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Ingresar';
+  }
+}
+
+async function doLogout() {
+  try { await fetch(LOGOUT_ENDPOINT, { method: 'POST', credentials: 'include' }); } catch(e) {}
+  SESSION_USER = null;
+  showLogin();
+  document.getElementById('loginPass').value = '';
+}
+
+async function checkSession() {
+  if (IN_CLAUDE) { showApp('Claude.ai'); return; } // dentro de Claude.ai no se exige login propio
+  try {
+    const res = await fetch(LOGIN_ENDPOINT, { method: 'GET', credentials: 'include' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.user) { showApp(data.user); return; }
+    }
+  } catch (e) {}
+  showLogin();
+}
+
+document.getElementById('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+document.getElementById('loginUser').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
 
 /* ═══════════════════════════════════════════════════════════════════════════
    CLASIFICADOR LOCAL (sin API, sin costo)
@@ -1032,55 +1119,10 @@ function localClassify(denominacion) {
   });
 }
 
-/* ───────────────────────────────────────────────────────────────────────────
-   API KEY — CONFIGURACIÓN PRIVADA (NO visible para el público)
-   • Para habilitar el motor IA en la versión abierta en un NAVEGADOR NORMAL
-     (fuera de Claude.ai), pega aquí tu clave de Anthropic.
-   • Déjala vacía si solo usarás el motor Local, o si abres la app DENTRO de
-     Claude.ai (ahí la IA va por la plataforma y no requiere clave).
-   • También puedes cargarla, solo tú, desde el modo admin (?admin=true).
-   ⚠ NOTA DE SEGURIDAD: en un sitio estático esta constante queda legible en el
-     código fuente. Para un despliegue público real, lo seguro es un proxy en
-     servidor que guarde la clave (no incrustarla en el HTML).
-─────────────────────────────────────────────────────────────────────────── */
-const CONFIGURED_API_KEY = '';   // ←—— pega aquí tu clave (sk-ant-api03-...) o déjala vacía
-
-let API_KEY = CONFIGURED_API_KEY || '';
-// La clave guardada en este navegador SOLO se usa en modo admin (configuración tuya).
-try {
-  const _admin = new URLSearchParams(location.search).get('admin') === 'true';
-  if (!API_KEY && _admin) API_KEY = localStorage.getItem('anthropic_api_key') || '';
-} catch(e) {}
-
-function saveApiKey() {
-  const v = document.getElementById('apiKeyInput').value.trim();
-  if (!v) { showToast('⚠ Ingresa una API key válida', 'warn'); return; }
-  API_KEY = v;
-  try { localStorage.setItem('anthropic_api_key', v); } catch(e) {}
-  updateApiStatus();
-  showToast('✅ API key guardada en este navegador', 'ok');
-}
-
-function updateApiStatus() {
-  const pill = document.getElementById('apiStatusPill');
-  const card = document.getElementById('apiCard');
-  if (API_KEY) {
-    pill.textContent = 'Configurada';
-    pill.classList.add('ok');
-    card.classList.add('ok');
-    document.getElementById('apiKeyInput').value = API_KEY;
-  } else {
-    pill.textContent = 'Sin configurar';
-    pill.classList.remove('ok');
-    card.classList.remove('ok');
-  }
-}
-
 function requireApiKey() {
-  if (IN_CLAUDE) return true;  // dentro de Claude.ai la API va por la plataforma
-  if (HAS_PROXY) return true;  // el proxy del servidor tiene la clave (variable de entorno)
-  if (API_KEY) return true;    // clave directa opcional (modo admin / código)
-  showToast('🔑 El motor IA requiere el proxy del servidor (sitio desplegado) o una clave en modo admin.', 'warn');
+  if (IN_CLAUDE) return true;        // dentro de Claude.ai la API va por la plataforma
+  if (SESSION_USER) return true;     // sesión de login válida: el proxy resuelve la clave
+  showLogin('Tu sesión expiró o no has iniciado sesión. Ingresa de nuevo.');
   return false;
 }
 
@@ -1096,27 +1138,14 @@ async function callClaude(items) {
   userPrompt += 'Responde solo el JSON.';
 
   let res;
-  // Elegir destino: 1) plataforma Claude.ai, 2) proxy serverless (seguro), 3) clave directa
-  let url, headers;
-  if (IN_CLAUDE) {
-    url = 'https://api.anthropic.com/v1/messages';
-    headers = { 'Content-Type': 'application/json' };
-  } else if (HAS_PROXY) {
-    url = API_PROXY;                                   // la clave la pone el servidor
-    headers = { 'Content-Type': 'application/json' };
-  } else {
-    url = 'https://api.anthropic.com/v1/messages';     // fallback directo (clave en el navegador)
-    headers = {
-      'Content-Type': 'application/json',
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    };
-  }
+  // Destino: 1) plataforma Claude.ai, 2) proxy serverless autenticado (sesión por cookie)
+  const url = IN_CLAUDE ? 'https://api.anthropic.com/v1/messages' : API_PROXY;
+  const headers = { 'Content-Type': 'application/json' };
   try {
     res = await fetch(url, {
       method: 'POST',
       headers,
+      credentials: IN_CLAUDE ? 'same-origin' : 'include', // envía la cookie de sesión al proxy
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 1500,
@@ -1125,17 +1154,21 @@ async function callClaude(items) {
       })
     });
   } catch (e) {
-    throw new Error(HAS_PROXY
-      ? 'No se pudo contactar el proxy del servidor (/api/clasificar). Verifica que la función esté desplegada.'
-      : 'No se pudo conectar con api.anthropic.com. Verifica tu conexión o si un firewall/proxy corporativo la bloquea.');
+    throw new Error(IN_CLAUDE
+      ? 'No se pudo conectar con la plataforma de Claude.'
+      : 'No se pudo contactar el servidor (/api/clasificar). Verifica tu conexión.');
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    showLogin('Tu sesión expiró o no es válida. Ingresa de nuevo.');
+    throw new Error('Sesión no autenticada o expirada.');
   }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const msg = err.error?.message || '';
-    if (res.status === 401) throw new Error(IN_CLAUDE ? 'Error de autenticación con la plataforma Claude. Reintenta en unos segundos.' : (HAS_PROXY ? 'El servidor rechazó la autenticación: revisa la variable de entorno ANTHROPIC_API_KEY en Vercel.' : 'API key inválida o expirada.'));
-    if (res.status === 429) throw new Error('Límite de uso de la API alcanzado. Espera unos segundos y reintenta.');
-    if (res.status === 400 && msg.includes('credit')) throw new Error('Tu cuenta de Anthropic no tiene créditos disponibles.');
+    if (res.status === 429) throw new Error('Límite de uso alcanzado. Espera unos segundos y reintenta.');
+    if (res.status === 400 && msg.includes('credit')) throw new Error('La cuenta de Anthropic configurada no tiene créditos disponibles.');
     throw new Error(msg || 'HTTP ' + res.status);
   }
 
@@ -1480,20 +1513,7 @@ try {
   document.getElementById('dbStatusText').textContent = 'Error al cargar base: ' + e.message;
 }
 
-// Modo admin: agregar ?admin=true a la URL para ver el selector de motor IA
-const IS_ADMIN = (() => {
-  try {
-    const params = new URLSearchParams(location.search);
-    return params.get('admin') === 'true';
-  } catch(e) { return false; }
-})();
-
-if (IS_ADMIN) {
-  document.getElementById('engineRow').style.display = '';
-}
-updateApiStatus();
-setEngine(IS_ADMIN ? ENGINE : 'local');
-document.getElementById('apiKeyInput').addEventListener('keydown', e => { if (e.key === 'Enter') saveApiKey(); });
+checkSession();
 </script>
 </body>
 </html>
