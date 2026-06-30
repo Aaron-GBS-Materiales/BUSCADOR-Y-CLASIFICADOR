@@ -1,14 +1,14 @@
 // ============================================================================
-//  /api/login  —  Autenticación de usuarios autorizados
+//  /api/login  —  Autenticación de usuarios (almacenados en Vercel KV)
 // ----------------------------------------------------------------------------
-//  POST { user, pass }  ->  valida contra APP_USERS (variable de entorno) y,
-//                            si es correcto, emite una cookie de sesión firmada.
+//  POST { user, pass }  ->  valida contra la base de datos de usuarios y, si
+//                            es correcto, emite una cookie de sesión firmada.
 //  GET                  ->  comprueba si ya existe una sesión válida (la usa
-//                            el frontend al cargar la página, para no pedir
-//                            login otra vez si la cookie sigue vigente).
+//                            el frontend al cargar la página).
 // ============================================================================
 
-const { parseUsers, safeEqual, createSessionToken, getSessionUser, setSessionCookie } = require('./_auth');
+const { verifyPassword } = require('./_users');
+const { createSessionToken, getSessionUser, setSessionCookie } = require('./_auth');
 
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -42,12 +42,23 @@ module.exports = async (req, res) => {
     return;
   }
 
-  const users = parseUsers();
-  const expectedPass = users[user];
-
-  // Si el usuario no existe, igual comparamos contra un valor fijo para que
-  // el tiempo de respuesta no delate si el usuario existe o no.
-  const valid = expectedPass !== undefined && safeEqual(pass, expectedPass);
+  let valid = false;
+  try {
+    const { getUser } = require('./_users');
+    const userData = await getUser(user);
+    console.log('[LOGIN DEBUG] usuario buscado:', user);
+    console.log('[LOGIN DEBUG] usuario encontrado:', userData ? 'SÍ' : 'NO');
+    if (userData) {
+      console.log('[LOGIN DEBUG] tipo de dato:', typeof userData);
+      console.log('[LOGIN DEBUG] tiene passwordSalt:', !!userData.passwordSalt);
+    }
+    valid = await verifyPassword(user, pass);
+    console.log('[LOGIN DEBUG] password válido:', valid);
+  } catch (e) {
+    console.log('[LOGIN DEBUG] error:', e.message);
+    res.status(500).json({ error: { message: 'Error del servidor al verificar credenciales.' } });
+    return;
+  }
 
   if (!valid) {
     res.status(401).json({ error: { message: 'Usuario o contraseña incorrectos.' } });
@@ -55,9 +66,9 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const token = createSessionToken(user);
+    const token = createSessionToken(user.toLowerCase());
     setSessionCookie(res, token);
-    res.status(200).json({ user });
+    res.status(200).json({ user: user.toLowerCase() });
   } catch (e) {
     res.status(500).json({ error: { message: 'Error del servidor: ' + (e && e.message ? e.message : String(e)) } });
   }
