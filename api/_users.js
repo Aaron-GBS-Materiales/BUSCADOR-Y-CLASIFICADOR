@@ -15,13 +15,13 @@
 //  (minúsculas, sin espacios extremos) antes de hashear, para que mayúsculas
 //  o espacios accidentales no impidan recuperar la cuenta.
 // ============================================================================
-
+ 
 const crypto = require('crypto');
 const { kv } = require('@vercel/kv');
-
+ 
 const USER_PREFIX = 'user:';
 const USERS_INDEX_KEY = 'users:index';
-
+ 
 // USER_SHAPE (referencia, no se exporta como tipo real en JS):
 // {
 //   username: string,
@@ -33,43 +33,46 @@ const USERS_INDEX_KEY = 'users:index';
 //   createdAt: number,
 //   updatedAt: number
 // }
-
+ 
 function hashWithSalt(value, salt) {
   return crypto.scryptSync(String(value), salt, 64).toString('hex');
 }
-
+ 
 function normalizeAnswer(answer) {
   return String(answer).trim().toLowerCase();
 }
-
+ 
 function makeSalt() {
   return crypto.randomBytes(16).toString('hex');
 }
-
+ 
 function safeEqual(a, b) {
   const bufA = Buffer.from(String(a));
   const bufB = Buffer.from(String(b));
   if (bufA.length !== bufB.length) return false;
   return crypto.timingSafeEqual(bufA, bufB);
 }
-
+ 
 async function getUser(username) {
   if (!username) return null;
   const key = USER_PREFIX + username.trim().toLowerCase();
   const data = await kv.get(key);
   if (!data) return null;
-  // Algunos clientes de KV devuelven el valor ya parseado como objeto, otros
-  // como string JSON crudo. Manejamos ambos casos explícitamente.
   if (typeof data === 'string') {
     try { return JSON.parse(data); } catch (e) { return null; }
   }
   return data;
 }
-
+ 
+async function kvSet(key, value) {
+  // Siempre guardar como string JSON para garantizar consistencia
+  await kv.set(key, JSON.stringify(value));
+}
+ 
 async function userExists(username) {
   return (await getUser(username)) !== null;
 }
-
+ 
 async function createUser({ username, password, securityQuestion, securityAnswer }) {
   const uname = String(username).trim().toLowerCase();
   if (!uname || !password || !securityQuestion || !securityAnswer) {
@@ -78,10 +81,10 @@ async function createUser({ username, password, securityQuestion, securityAnswer
   if (await userExists(uname)) {
     throw new Error('Ese nombre de usuario ya existe.');
   }
-
+ 
   const passwordSalt = makeSalt();
   const securityAnswerSalt = makeSalt();
-
+ 
   const record = {
     username: uname,
     passwordHash: hashWithSalt(password, passwordSalt),
@@ -92,32 +95,32 @@ async function createUser({ username, password, securityQuestion, securityAnswer
     createdAt: Date.now(),
     updatedAt: Date.now()
   };
-
-  await kv.set(USER_PREFIX + uname, record);
+ 
+  await kvSet(USER_PREFIX + uname, record);
   await kv.sadd(USERS_INDEX_KEY, uname);
   return { username: uname };
 }
-
+ 
 async function verifyPassword(username, password) {
   const user = await getUser(username);
   if (!user) return false;
   const candidate = hashWithSalt(password, user.passwordSalt);
   return safeEqual(candidate, user.passwordHash);
 }
-
+ 
 async function getSecurityQuestion(username) {
   const user = await getUser(username);
   if (!user) return null;
   return user.securityQuestion;
 }
-
+ 
 async function verifySecurityAnswer(username, answer) {
   const user = await getUser(username);
   if (!user) return false;
   const candidate = hashWithSalt(normalizeAnswer(answer), user.securityAnswerSalt);
   return safeEqual(candidate, user.securityAnswerHash);
 }
-
+ 
 async function setPassword(username, newPassword) {
   const user = await getUser(username);
   if (!user) throw new Error('El usuario no existe.');
@@ -125,10 +128,10 @@ async function setPassword(username, newPassword) {
   user.passwordHash = hashWithSalt(newPassword, passwordSalt);
   user.passwordSalt = passwordSalt;
   user.updatedAt = Date.now();
-  await kv.set(USER_PREFIX + user.username, user);
+  await kvSet(USER_PREFIX + user.username, user);
   return true;
 }
-
+ 
 async function setSecurityAnswer(username, securityQuestion, securityAnswer) {
   const user = await getUser(username);
   if (!user) throw new Error('El usuario no existe.');
@@ -137,21 +140,21 @@ async function setSecurityAnswer(username, securityQuestion, securityAnswer) {
   user.securityAnswerHash = hashWithSalt(normalizeAnswer(securityAnswer), securityAnswerSalt);
   user.securityAnswerSalt = securityAnswerSalt;
   user.updatedAt = Date.now();
-  await kv.set(USER_PREFIX + user.username, user);
+  await kvSet(USER_PREFIX + user.username, user);
   return true;
 }
-
+ 
 async function listUsernames() {
   return (await kv.smembers(USERS_INDEX_KEY)) || [];
 }
-
+ 
 async function deleteUser(username) {
   const uname = String(username).trim().toLowerCase();
   await kv.del(USER_PREFIX + uname);
   await kv.srem(USERS_INDEX_KEY, uname);
   return true;
 }
-
+ 
 module.exports = {
   getUser,
   userExists,
@@ -164,4 +167,4 @@ module.exports = {
   listUsernames,
   deleteUser
 };
-
+ 
