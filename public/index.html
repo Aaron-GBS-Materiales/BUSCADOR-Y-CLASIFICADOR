@@ -353,6 +353,18 @@
     font-size:12.5px; color:var(--text-dim);
   }
   .session-row strong { color: var(--text); }
+  .link-btn {
+    display:block; width:100%; text-align:center;
+    background:none; border:none; cursor:pointer;
+    color: var(--teal); font-size:12.5px; font-family:var(--sans);
+    margin-top:14px; padding:4px;
+  }
+  .link-btn:hover { text-decoration: underline; }
+  .login-ok {
+    margin-top:14px; font-size:12px; color:var(--success);
+    background:rgba(34,197,94,.1); border:1px solid rgba(34,197,94,.3);
+    border-radius:8px; padding:9px 12px; text-align:left;
+  }
 
   @media (max-width:860px) {
     .bulk-grid { grid-template-columns:1fr; }
@@ -378,7 +390,9 @@
 
   <!-- ═══ LOGIN (bloquea el uso hasta autenticarse) ═══ -->
   <div class="login-overlay" id="loginOverlay">
-    <div class="login-card">
+
+    <!-- Vista: Iniciar sesión -->
+    <div class="login-card" id="viewLogin">
       <div class="login-logo">U<span>.</span></div>
       <h2>Acceso restringido</h2>
       <p class="login-sub">Ingresa tus credenciales para usar el clasificador con IA.</p>
@@ -387,14 +401,86 @@
       <label class="login-label">Contraseña</label>
       <input type="password" id="loginPass" class="login-input" autocomplete="current-password" placeholder="••••••••">
       <button class="btn primary" id="loginBtn" style="width:100%; margin-top:14px;" onclick="doLogin()">Ingresar</button>
+      <button class="link-btn" onclick="goToForgotStep1()">¿Olvidaste tu contraseña?</button>
       <div class="login-error" id="loginError" style="display:none;"></div>
     </div>
+
+    <!-- Vista: Recuperar — Paso 1 (pedir usuario y mostrar pregunta) -->
+    <div class="login-card" id="viewForgot1" style="display:none;">
+      <div class="login-logo">U<span>.</span></div>
+      <h2>Recuperar contraseña</h2>
+      <p class="login-sub">Escribe tu usuario para ver tu pregunta de seguridad.</p>
+      <label class="login-label">Usuario</label>
+      <input type="text" id="forgotUser" class="login-input" autocomplete="username" placeholder="usuario">
+      <button class="btn primary" style="width:100%; margin-top:14px;" onclick="loadSecurityQuestion()">Continuar</button>
+      <button class="link-btn" onclick="goToLogin()">← Volver a iniciar sesión</button>
+      <div class="login-error" id="forgot1Error" style="display:none;"></div>
+    </div>
+
+    <!-- Vista: Recuperar — Paso 2 (responder y definir nueva contraseña) -->
+    <div class="login-card" id="viewForgot2" style="display:none;">
+      <div class="login-logo">U<span>.</span></div>
+      <h2>Responde tu pregunta</h2>
+      <p class="login-sub" id="forgotQuestionLabel">—</p>
+      <label class="login-label">Respuesta</label>
+      <input type="text" id="forgotAnswer" class="login-input" autocomplete="off" placeholder="Tu respuesta">
+      <label class="login-label">Nueva contraseña</label>
+      <input type="password" id="forgotNewPass" class="login-input" autocomplete="new-password" placeholder="Mínimo 8 caracteres">
+      <label class="login-label">Confirmar nueva contraseña</label>
+      <input type="password" id="forgotNewPass2" class="login-input" autocomplete="new-password" placeholder="Repite la contraseña">
+      <button class="btn primary" style="width:100%; margin-top:14px;" onclick="submitReset()">Restablecer contraseña</button>
+      <button class="link-btn" onclick="goToLogin()">← Volver a iniciar sesión</button>
+      <div class="login-error" id="forgot2Error" style="display:none;"></div>
+      <div class="login-ok" id="forgot2Ok" style="display:none;"></div>
+    </div>
+
   </div>
 
   <!-- ═══ BARRA DE SESIÓN (usuario autenticado) ═══ -->
   <div class="session-row" id="sessionRow" style="display:none;">
     <span>👤 Sesión: <strong id="sessionUserLabel"></strong></span>
-    <button class="btn ghost" style="padding:6px 14px; font-size:13px;" onclick="doLogout()">Cerrar sesión</button>
+    <span style="margin-left:auto; display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn ghost" style="padding:6px 14px; font-size:13px;" onclick="openSecuritySetup()">🔒 Seguridad</button>
+      <button class="btn ghost" style="padding:6px 14px; font-size:13px;" onclick="openChangePassword()">🔑 Cambiar contraseña</button>
+      <button class="btn ghost" style="padding:6px 14px; font-size:13px;" onclick="doLogout()">Cerrar sesión</button>
+    </span>
+  </div>
+
+  <!-- ═══ MODAL: CONFIGURACIÓN DE SEGURIDAD (pregunta + respuesta) ═══ -->
+  <div class="login-overlay" id="securitySetupOverlay" style="display:none;">
+    <div class="login-card">
+      <div class="login-logo">U<span>.</span></div>
+      <h2>Configura tu pregunta de seguridad</h2>
+      <p class="login-sub">Solo tú conocerás la respuesta. Se usará si olvidas tu contraseña.</p>
+      <label class="login-label">Pregunta de seguridad</label>
+      <input type="text" id="ssQuestion" class="login-input" placeholder="ej: ¿Nombre de tu primera mascota?" autocomplete="off">
+      <label class="login-label">Respuesta</label>
+      <input type="text" id="ssAnswer" class="login-input" placeholder="Tu respuesta secreta" autocomplete="off">
+      <div class="hint" style="margin-top:6px; font-size:11px; color:var(--text-mute);">No distingue mayúsculas ni espacios.</div>
+      <button class="btn primary" style="width:100%; margin-top:14px;" onclick="submitSecuritySetup()">Guardar</button>
+      <button class="link-btn" onclick="closeSecuritySetup()">Cancelar</button>
+      <div class="login-error" id="ssError" style="display:none;"></div>
+      <div class="login-ok" id="ssOk" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- ═══ MODAL: CAMBIAR CONTRASEÑA (usuario ya logueado) ═══ -->
+  <div class="login-overlay" id="changePassOverlay" style="display:none;">
+    <div class="login-card">
+      <div class="login-logo">U<span>.</span></div>
+      <h2>Cambiar contraseña</h2>
+      <p class="login-sub">Confirma tu contraseña actual para definir una nueva.</p>
+      <label class="login-label">Contraseña actual</label>
+      <input type="password" id="cpCurrent" class="login-input" autocomplete="current-password" placeholder="••••••••">
+      <label class="login-label">Nueva contraseña</label>
+      <input type="password" id="cpNew" class="login-input" autocomplete="new-password" placeholder="Mínimo 8 caracteres">
+      <label class="login-label">Confirmar nueva contraseña</label>
+      <input type="password" id="cpNew2" class="login-input" autocomplete="new-password" placeholder="Repite la contraseña">
+      <button class="btn primary" style="width:100%; margin-top:14px;" onclick="submitChangePassword()">Guardar nueva contraseña</button>
+      <button class="link-btn" onclick="closeChangePassword()">Cancelar</button>
+      <div class="login-error" id="cpError" style="display:none;"></div>
+      <div class="login-ok" id="cpOk" style="display:none;"></div>
+    </div>
   </div>
 
   <!-- ═══ TABS ═══ -->
@@ -883,15 +969,209 @@ const IN_CLAUDE = (() => {
 const API_PROXY = '/api/clasificar';
 const LOGIN_ENDPOINT = '/api/login';
 const LOGOUT_ENDPOINT = '/api/logout';
+const FORGOT_ENDPOINT = '/api/forgot-password';
+const RESET_ENDPOINT = '/api/reset-password';
+const CHANGE_PASS_ENDPOINT = '/api/change-password';
+const SECURITY_SETUP_ENDPOINT = '/api/security-setup';
 
 let SESSION_USER = null; // nombre del usuario autenticado, o null
+
+function showLoginView(viewId) {
+  ['viewLogin', 'viewForgot1', 'viewForgot2'].forEach(id => {
+    document.getElementById(id).style.display = (id === viewId) ? 'block' : 'none';
+  });
+}
 
 function showLogin(message) {
   document.getElementById('loginOverlay').style.display = 'flex';
   document.getElementById('sessionRow').style.display = 'none';
+  showLoginView('viewLogin');
   const err = document.getElementById('loginError');
   if (message) { err.textContent = message; err.style.display = 'block'; }
   else { err.style.display = 'none'; }
+}
+
+function goToLogin() {
+  showLoginView('viewLogin');
+  document.getElementById('loginError').style.display = 'none';
+}
+
+function goToForgotStep1() {
+  showLoginView('viewForgot1');
+  document.getElementById('forgotUser').value = document.getElementById('loginUser').value.trim();
+  document.getElementById('forgot1Error').style.display = 'none';
+}
+
+async function loadSecurityQuestion() {
+  const username = document.getElementById('forgotUser').value.trim();
+  const errEl = document.getElementById('forgot1Error');
+  if (!username) { errEl.textContent = 'Ingresa tu usuario.'; errEl.style.display = 'block'; return; }
+  errEl.style.display = 'none';
+  try {
+    const res = await fetch(FORGOT_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      document.getElementById('forgotQuestionLabel').textContent = data.question || '¿Cuál es tu pregunta de seguridad?';
+      document.getElementById('forgotAnswer').value = '';
+      document.getElementById('forgotNewPass').value = '';
+      document.getElementById('forgotNewPass2').value = '';
+      document.getElementById('forgot2Error').style.display = 'none';
+      document.getElementById('forgot2Ok').style.display = 'none';
+      // Guardamos el usuario en un data-attribute para el paso 2
+      document.getElementById('viewForgot2').dataset.username = username;
+      showLoginView('viewForgot2');
+    } else {
+      errEl.textContent = data.error?.message || 'No se pudo continuar. Verifica tu usuario.';
+      errEl.style.display = 'block';
+    }
+  } catch (e) {
+    errEl.textContent = 'No se pudo contactar el servidor.';
+    errEl.style.display = 'block';
+  }
+}
+
+async function submitReset() {
+  const username = document.getElementById('viewForgot2').dataset.username || '';
+  const securityAnswer = document.getElementById('forgotAnswer').value;
+  const newPass = document.getElementById('forgotNewPass').value;
+  const newPass2 = document.getElementById('forgotNewPass2').value;
+  const errEl = document.getElementById('forgot2Error');
+  const okEl = document.getElementById('forgot2Ok');
+  okEl.style.display = 'none';
+
+  if (!securityAnswer || !newPass) { errEl.textContent = 'Completa todos los campos.'; errEl.style.display = 'block'; return; }
+  if (newPass.length < 8) { errEl.textContent = 'La nueva contraseña debe tener al menos 8 caracteres.'; errEl.style.display = 'block'; return; }
+  if (newPass !== newPass2) { errEl.textContent = 'Las contraseñas no coinciden.'; errEl.style.display = 'block'; return; }
+  errEl.style.display = 'none';
+
+  try {
+    const res = await fetch(RESET_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, securityAnswer, newPassword: newPass })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      okEl.textContent = '✅ Contraseña actualizada. Ya puedes iniciar sesión con tu nueva contraseña.';
+      okEl.style.display = 'block';
+      setTimeout(() => {
+        goToLogin();
+        document.getElementById('loginUser').value = username;
+      }, 1800);
+    } else {
+      errEl.textContent = data.error?.message || 'No se pudo restablecer la contraseña.';
+      errEl.style.display = 'block';
+    }
+  } catch (e) {
+    errEl.textContent = 'No se pudo contactar el servidor.';
+    errEl.style.display = 'block';
+  }
+}
+
+function openSecuritySetup() {
+  document.getElementById('ssQuestion').value = '';
+  document.getElementById('ssAnswer').value = '';
+  document.getElementById('ssError').style.display = 'none';
+  document.getElementById('ssOk').style.display = 'none';
+  document.getElementById('securitySetupOverlay').style.display = 'flex';
+}
+
+function closeSecuritySetup() {
+  document.getElementById('securitySetupOverlay').style.display = 'none';
+}
+
+async function submitSecuritySetup() {
+  const securityQuestion = document.getElementById('ssQuestion').value.trim();
+  const securityAnswer = document.getElementById('ssAnswer').value;
+  const errEl = document.getElementById('ssError');
+  const okEl = document.getElementById('ssOk');
+  okEl.style.display = 'none';
+
+  if (!securityQuestion || !securityAnswer) {
+    errEl.textContent = 'Completa la pregunta y la respuesta.';
+    errEl.style.display = 'block';
+    return;
+  }
+  errEl.style.display = 'none';
+
+  try {
+    const res = await fetch(SECURITY_SETUP_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ securityQuestion, securityAnswer })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      okEl.textContent = '✅ Pregunta de seguridad guardada correctamente.';
+      okEl.style.display = 'block';
+      setTimeout(closeSecuritySetup, 1500);
+    } else {
+      if (res.status === 401) { closeSecuritySetup(); showLogin('Tu sesión expiró.'); return; }
+      errEl.textContent = data.error?.message || 'No se pudo guardar.';
+      errEl.style.display = 'block';
+    }
+  } catch (e) {
+    errEl.textContent = 'No se pudo contactar el servidor.';
+    errEl.style.display = 'block';
+  }
+}
+
+function openChangePassword() {
+  document.getElementById('cpCurrent').value = '';
+  document.getElementById('cpNew').value = '';
+  document.getElementById('cpNew2').value = '';
+  document.getElementById('cpError').style.display = 'none';
+  document.getElementById('cpOk').style.display = 'none';
+  document.getElementById('changePassOverlay').style.display = 'flex';
+}
+
+function closeChangePassword() {
+  document.getElementById('changePassOverlay').style.display = 'none';
+}
+
+async function submitChangePassword() {
+  const currentPassword = document.getElementById('cpCurrent').value;
+  const newPass = document.getElementById('cpNew').value;
+  const newPass2 = document.getElementById('cpNew2').value;
+  const errEl = document.getElementById('cpError');
+  const okEl = document.getElementById('cpOk');
+  okEl.style.display = 'none';
+
+  if (!currentPassword || !newPass) { errEl.textContent = 'Completa todos los campos.'; errEl.style.display = 'block'; return; }
+  if (newPass.length < 8) { errEl.textContent = 'La nueva contraseña debe tener al menos 8 caracteres.'; errEl.style.display = 'block'; return; }
+  if (newPass !== newPass2) { errEl.textContent = 'Las contraseñas no coinciden.'; errEl.style.display = 'block'; return; }
+  errEl.style.display = 'none';
+
+  try {
+    const res = await fetch(CHANGE_PASS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ currentPassword, newPassword: newPass })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      okEl.textContent = '✅ Contraseña actualizada correctamente.';
+      okEl.style.display = 'block';
+      setTimeout(closeChangePassword, 1500);
+    } else {
+      if (res.status === 401 && /sesión/i.test(data.error?.message || '')) {
+        closeChangePassword();
+        showLogin('Tu sesión expiró. Ingresa de nuevo.');
+        return;
+      }
+      errEl.textContent = data.error?.message || 'No se pudo cambiar la contraseña.';
+      errEl.style.display = 'block';
+    }
+  } catch (e) {
+    errEl.textContent = 'No se pudo contactar el servidor.';
+    errEl.style.display = 'block';
+  }
 }
 
 function showApp(username) {
@@ -948,6 +1228,9 @@ async function checkSession() {
 
 document.getElementById('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 document.getElementById('loginUser').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+document.getElementById('forgotUser').addEventListener('keydown', e => { if (e.key === 'Enter') loadSecurityQuestion(); });
+document.getElementById('forgotNewPass2').addEventListener('keydown', e => { if (e.key === 'Enter') submitReset(); });
+document.getElementById('cpNew2').addEventListener('keydown', e => { if (e.key === 'Enter') submitChangePassword(); });
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
