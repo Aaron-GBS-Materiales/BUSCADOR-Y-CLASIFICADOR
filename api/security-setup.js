@@ -1,6 +1,3 @@
-// /api/security-setup — El usuario configura su propia pregunta de seguridad
-// Requiere sesión válida (cookie). El admin nunca ve la pregunta ni la respuesta.
-
 const { getSessionUser } = require('./_auth');
 const { setSecurityAnswer } = require('./_users');
 
@@ -12,7 +9,12 @@ module.exports = async (req, res) => {
     return;
   }
 
+  // DEBUG
+  console.log('[SECURITY-SETUP] authorization header:', req.headers['authorization'] ? 'PRESENTE' : 'AUSENTE');
+  
   const username = getSessionUser(req);
+  console.log('[SECURITY-SETUP] username obtenido:', username);
+
   if (!username) {
     res.status(401).json({ error: { message: 'Sesión no autenticada o expirada.' } });
     return;
@@ -25,7 +27,6 @@ module.exports = async (req, res) => {
   body = body && typeof body === 'object' ? body : {};
 
   const { securityQuestion, securityAnswer } = body;
-
   if (!securityQuestion || !securityAnswer) {
     res.status(400).json({ error: { message: 'Faltan la pregunta y la respuesta.' } });
     return;
