@@ -18,6 +18,7 @@ module.exports = async (req, res) => {
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
+  const model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
   if (!apiKey) {
     res.status(500).json({
       error: { message: 'Falta la variable de entorno ANTHROPIC_API_KEY en el servidor.' }
@@ -34,7 +35,7 @@ module.exports = async (req, res) => {
 
   // Reenviar SOLO los campos esperados (evita usar el proxy para otra cosa)
   const payload = {
-    model: typeof body.model === 'string' ? body.model : 'claude-sonnet-4-20250514',
+    model: typeof body.model === 'string' ? body.model : model,
     max_tokens: Math.min(Math.max(Number(body.max_tokens) || 1500, 1), 4096),
     messages: Array.isArray(body.messages) ? body.messages : []
   };
