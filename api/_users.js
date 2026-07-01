@@ -74,9 +74,9 @@ async function userExists(username) {
   return (await getUser(username)) !== null;
 }
 
-async function createUser({ username, password, securityQuestion, securityAnswer }) {
+async function createUser({ username, password, securityQuestion = '', securityAnswer = '' }) {
   const uname = String(username).trim().toLowerCase();
-  if (!uname || !password || !securityQuestion || !securityAnswer) {
+  if (!uname || !password) {
     throw new Error('Faltan campos obligatorios para crear el usuario.');
   }
   if (await userExists(uname)) {
@@ -168,6 +168,3 @@ module.exports = {
   listUsernames,
   deleteUser
 };
-
-
-
