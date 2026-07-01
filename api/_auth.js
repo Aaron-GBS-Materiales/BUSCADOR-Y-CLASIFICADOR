@@ -104,7 +104,7 @@ function setSessionCookie(res, token) {
     'Path=/',
     'HttpOnly',
     'Secure',
-    'SameSite=Strict',
+    'SameSite=Lax',
     `Max-Age=${SESSION_TTL_SECONDS}`
   ];
   res.setHeader('Set-Cookie', attrs.join('; '));
