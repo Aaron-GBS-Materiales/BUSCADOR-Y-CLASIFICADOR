@@ -1,3 +1,4 @@
+// v2
 const { verifyPassword, getUser } = require('./_users');
 const { createSessionToken, getSessionUser } = require('./_auth');
 
