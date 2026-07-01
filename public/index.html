@@ -1092,10 +1092,6 @@ function openSecuritySetup() {
   document.getElementById('securitySetupOverlay').style.display = 'flex';
 }
 
-function closeSecuritySetup() {
-  document.getElementById('securitySetupOverlay').style.display = 'none';
-}
-
 async function submitSecuritySetup() {
   const securityQuestion = document.getElementById('ssQuestion').value.trim();
   const securityAnswer = document.getElementById('ssAnswer').value;
@@ -1121,6 +1117,11 @@ async function submitSecuritySetup() {
     if (res.ok) {
       okEl.textContent = '✅ Pregunta de seguridad guardada correctamente.';
       okEl.style.display = 'block';
+      // Restaurar botón cancelar y textos
+      const cancelBtn = document.querySelector('#securitySetupOverlay .link-btn');
+      if (cancelBtn) cancelBtn.style.display = '';
+      document.querySelector('#securitySetupOverlay h2').textContent = 'Configura tu pregunta de seguridad';
+      document.querySelector('#securitySetupOverlay p.login-sub').textContent = 'Solo tú conocerás la respuesta. Se usará si olvidas tu contraseña.';
       setTimeout(closeSecuritySetup, 1500);
     } else {
       if (res.status === 401) { closeSecuritySetup(); showLogin('Tu sesión expiró.'); return; }
@@ -1191,6 +1192,48 @@ function showApp(username) {
   document.getElementById('loginOverlay').style.display = 'none';
   document.getElementById('sessionRow').style.display = 'flex';
   document.getElementById('sessionUserLabel').textContent = username;
+  // Verificar si el usuario ya configuró su pregunta de seguridad
+  if (!IN_CLAUDE) checkSecurityStatus();
+}
+
+async function checkSecurityStatus() {
+  try {
+    const res = await fetch('/api/security-status', { method: 'GET', credentials: 'include' });
+    if (res.ok) {
+      const data = await res.json();
+      if (!data.configured) {
+        // Forzar configuración: mostrar modal sin opción de cancelar
+        document.getElementById('ssQuestion').value = '';
+        document.getElementById('ssAnswer').value = '';
+        document.getElementById('ssError').style.display = 'none';
+        document.getElementById('ssOk').style.display = 'none';
+        // Ocultar botón cancelar temporalmente
+        const cancelBtn = document.querySelector('#securitySetupOverlay .link-btn');
+        if (cancelBtn) cancelBtn.style.display = 'none';
+        document.getElementById('securitySetupOverlay').style.display = 'flex';
+        document.querySelector('#securitySetupOverlay h2').textContent = 'Configura tu seguridad para continuar';
+        document.querySelector('#securitySetupOverlay p.login-sub').textContent = 'Debes configurar una pregunta de seguridad antes de usar el clasificador.';
+      }
+    }
+  } catch(e) {}
+}
+
+function closeSecuritySetup() {
+  // Solo cerrar si ya tiene pregunta configurada
+  fetch('/api/security-status', { method: 'GET', credentials: 'include' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.configured) {
+        document.getElementById('securitySetupOverlay').style.display = 'none';
+        // Restaurar botón cancelar y textos originales
+        const cancelBtn = document.querySelector('#securitySetupOverlay .link-btn');
+        if (cancelBtn) cancelBtn.style.display = '';
+        document.querySelector('#securitySetupOverlay h2').textContent = 'Configura tu pregunta de seguridad';
+        document.querySelector('#securitySetupOverlay p.login-sub').textContent = 'Solo tú conocerás la respuesta. Se usará si olvidas tu contraseña.';
+      }
+    }).catch(() => {
+      document.getElementById('securitySetupOverlay').style.display = 'none';
+    });
 }
 
 async function doLogin() {
