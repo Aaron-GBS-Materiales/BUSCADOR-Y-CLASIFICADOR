@@ -42,7 +42,6 @@ module.exports = async (req, res) => {
     return;
   }
 
-  let valid = false;
   try {
     const { getUser } = require('./_users');
     const userData = await getUser(user);
@@ -68,10 +67,12 @@ module.exports = async (req, res) => {
   try {
     const token = createSessionToken(user.toLowerCase());
     setSessionCookie(res, token);
-    res.status(200).json({ user: user.toLowerCase() });
+    // Incluir si tiene pregunta de seguridad configurada
+    const { getUser } = require('./_users');
+    const userData = await getUser(user).catch(() => null);
+    const securityConfigured = !!(userData && userData.securityQuestion && userData.securityQuestion.trim());
+    res.status(200).json({ user: user.toLowerCase(), securityConfigured });
   } catch (e) {
     res.status(500).json({ error: { message: 'Error del servidor: ' + (e && e.message ? e.message : String(e)) } });
   }
 };
-
-
