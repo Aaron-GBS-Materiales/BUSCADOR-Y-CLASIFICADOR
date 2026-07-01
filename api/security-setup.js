@@ -39,3 +39,4 @@ module.exports = async (req, res) => {
     res.status(500).json({ error: { message: e && e.message ? e.message : 'Error del servidor.' } });
   }
 };
+
