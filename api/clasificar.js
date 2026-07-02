@@ -345,8 +345,11 @@ Ordena las familias de más a menos probable.`;
   ], system);
 
   const raw = data.content[0].text.trim();
-  const text = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-  const parsed = JSON.parse(text);
+  const clean = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+  // Extraer el primer objeto JSON completo
+  const match = clean.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('No se encontró JSON válido en la respuesta de la IA.');
+  const parsed = JSON.parse(match[0]);
   return parsed.families || [];
 }
 
@@ -385,8 +388,11 @@ Incluye máximo 2 alternativas relevantes.`;
   ], system);
 
   const raw = data.content[0].text.trim();
-  const text = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-  return JSON.parse(text);
+  const clean = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+  // Extraer el primer objeto JSON completo
+  const match = clean.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('No se encontró JSON válido en la respuesta de la IA.');
+  return JSON.parse(match[0]);
 }
 
 module.exports = async (req, res) => {
