@@ -1,18 +1,12 @@
 // ============================================================================
-//  /api/clasificar  —  Motor de clasificación UNSPSC con IA pura (2 pasos)
+//  /api/clasificar  —  Motor de clasificación UNSPSC con IA pura (Opción C)
 // ----------------------------------------------------------------------------
 //  FLUJO:
-//  1. El cliente envía: { denominacion, familyProducts: { "4321": [[cod,nom],...], ... } }
-//     donde familyProducts contiene los productos de las 3 familias más probables
-//     (determinadas por la primera llamada IA, realizada también aquí).
-//
-//  Si el cliente NO envía familyProducts (primera llamada), el servidor:
-//    - Llama a la IA con la jerarquía completa para obtener las TOP 3 familias
-//    - Devuelve { step: 'families', families: ['4321','4319','4323'] }
-//
-//  Si el cliente envía familyProducts, el servidor:
-//    - Llama a la IA con los productos de esas familias para obtener el código exacto
-//    - Devuelve el resultado final con código, confianza y alternativas
+//  1. Cliente envía { denominacion } → servidor llama IA con 55 segmentos
+//     → devuelve { step:'segments', segments:['31','43'] }
+//  2. Cliente extrae familias+productos de esos segmentos de su base local
+//     y envía { denominacion, familyProducts:{...} }
+//     → servidor llama IA → devuelve { step:'result', result:{...} }
 // ============================================================================
 
 const { getSessionUser } = require('./_auth');
@@ -20,290 +14,65 @@ const { getSessionUser } = require('./_auth');
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
 
-// Jerarquía UNSPSC embebida (segmentos y familias, ~20KB)
-const HIERARCHY_TEXT = `SEG 10: Material Vivo Vegetal y Animal, Accesorios y Suministros
-  FAM 1013: Recipientes y habitat para animales
-  FAM 1014: Productos de talabarteria y arreo
-  FAM 1017: Fertilizantes y nutrientes para plantas y herbicidas
-  FAM 1019: Productos para el control de plagas
+// 55 segmentos UNSPSC (~3.5KB) para el Paso 1
+const SEGMENTS_TEXT = `SEG 10: Material Vivo Vegetal y Animal, Accesorios y Suministros
 SEG 11: Material Mineral, Textil y  Vegetal y Animal No Comestible
-  FAM 1110: Minerales, minerales metalicos y metales
-  FAM 1111: Tierra y piedra
-  FAM 1112: Productos no comestibles de planta y silvicultura
-  FAM 1114: Chatarra y materiales de desecho
-  FAM 1115: Fibra, hilos e hilados
-  FAM 1116: Tejidos y materiales de cuero
-  FAM 1117: Aleaciones
-  FAM 1118: oxido metalico
-  FAM 1119: Desechos metalicos y chatarra
 SEG 12: Material Quimico incluyendo Bioquimicos y Materiales de Gas
-  FAM 1213: Materiales explosivos
-  FAM 1214: Elementos y gases
-  FAM 1216: Aditivos
-  FAM 1217: Colorantes
-  FAM 1218: Ceras y aceites
-  FAM 1219: Solventes
-  FAM 1235: Compuestos y mezclas
 SEG 13: Materiales de Resina, Colofonia, Caucho, Espuma, Pelicula y Elastomericos
-  FAM 1310: Caucho y elastomeros
-  FAM 1311: Resinas y colofonias y otros materiales derivados de resina
 SEG 14: Materiales y Productos de Papel
-  FAM 1410: Materiales de papel
-  FAM 1411: Productos de papel
-  FAM 1412: Papel para uso industrial
-SEG 15: Combustibles y Combustibles Nucleares y Fluidos
-  FAM 1510: Combustibles de petroleo y carbon y gas natural
-  FAM 1511: Combustibles gaseosos y aditivos
-  FAM 1512: Lubricantes y aceites y grasas y fluidos anticorrosion
-  FAM 1513: Combustibles nucleares y materiales
-SEG 20: Maquinaria para Mineria, Pozos Petroleros y Construccion
-  FAM 2010: Maquinaria y equipo minero
-  FAM 2011: Maquinaria para perforacion de pozos
-  FAM 2012: Servicios de pozos y materiales
-  FAM 2013: Fluidos de pozos y materiales
-  FAM 2014: Equipo de produccion de campo petrolero
-SEG 21: Maquinaria y Accesorios para Agricultura y Silvicultura y Jardineria
-  FAM 2110: Equipo agricola
-  FAM 2111: Equipos de pesca comercial y acuicultura
-SEG 22: Maquinaria para Construccion
-  FAM 2210: Maquinaria para movimiento de tierra
-SEG 23: Maquinaria Industrial, Manufactura y Proceso
-  FAM 2310: Maquinaria de fabricacion y proceso
-  FAM 2311: Maquinaria de refineria de petroleo
-  FAM 2312: Maquinaria para industria textil
-  FAM 2313: Materiales y suministros abrasivos
-  FAM 2314: Maquinaria de cuero
-  FAM 2315: Maquinaria de plastico y caucho
-  FAM 2316: Maquinaria de fabricacion
-  FAM 2317: Maquinaria de manufactura de vidrio o ceramica
-  FAM 2318: Maquinaria para procesamiento de alimentos y bebidas
-  FAM 2319: Maquinaria para mezclado
-  FAM 2320: Equipo de separacion y columnas
-  FAM 2321: Maquinaria semiconductora y de circuito impreso
-  FAM 2322: Maquinaria para procesamiento de carne y aves
-  FAM 2323: Herramientas de corte para maquinas
-  FAM 2324: Maquinas herramienta de metal
-  FAM 2325: Maquinas herramienta de metal para conformado
-  FAM 2326: Fabricacion y manufactura aditiva
-  FAM 2327: Maquinaria de soldadura
-  FAM 2328: Maquinaria de tratamiento superficial
-  FAM 2329: Herramientas de corte para maquinas
-  FAM 2330: Equipo de corte de cable y alambre
+SEG 15: Materiales Combustibles, Aditivos para Combustibles, Lubricantes y Anticorrosivos
+SEG 20: Maquinaria y Accesorios de Mineria y Perforacion de Pozos
+SEG 21: Maquinaria y Accesorios para Agricultura, Pesca, Silvicultura y Fauna
+SEG 22: Maquinaria y Accesorios para Construccion y Edificacion
+SEG 23: Maquinaria y Accesorios para Manufactura y Procesamiento Industrial
 SEG 24: Maquinaria, Accesorios y Suministros para Manejo, Acondicionamiento y Almacenamiento de Materiales
-  FAM 2410: Maquinaria y equipo para manejo de materiales
-  FAM 2411: Contenedores y almacenamiento
-  FAM 2412: Empaques industriales
-  FAM 2413: Empaques de consumo
-  FAM 2414: Materiales de empaque
 SEG 25: Vehiculos Comerciales, Militares y Particulares, Accesorios y Componentes
-  FAM 2510: Automoviles y Camiones y Autobuses y Motocicletas y sus Accesorios y Componentes
-  FAM 2512: Vehiculos ferroviarios y tranvias y sus accesorios y componentes
-  FAM 2516: Bicicletas y sus accesorios y componentes
-  FAM 2517: Componentes y sistemas de transporte
-  FAM 2518: Chasis y estructuras del cuerpo de vehiculo
-  FAM 2519: Equipo para servicios de transporte
 SEG 26: Maquinaria y Accesorios para Generacion y Distribucion de Energia
-  FAM 2610: Motores electricos y generadores y accesorios
-  FAM 2611: Transmision y distribucion de energia
-  FAM 2612: Alambres, cables y arneses
-  FAM 2613: Equipos y plantas de generacion de energia
-  FAM 2614: Equipos nucleares
 SEG 27: Herramientas y Maquinaria General
-  FAM 2711: Herramientas de mano
-  FAM 2712: Equipos de construccion y accesorios
-  FAM 2713: Equipo hidraulico y neumático
 SEG 30: Componentes y Suministros para Estructuras, Edificacion, Construccion y Obras Civiles
-  FAM 3010: Componentes estructurales
-  FAM 3011: Materiales de construccion
-  FAM 3012: Materiales viales
-  FAM 3013: Materiales para albañileria
-  FAM 3014: Aislaciones y barreras
-  FAM 3015: Materiales de techado, revestimiento y fachada
-  FAM 3016: Componentes y accesorios interiores
-  FAM 3017: Puertas, ventanas y vidrios
-  FAM 3018: Plomeria
-  FAM 3019: Andamios
-  FAM 3024: Componentes de construccion de estructura portatil
-  FAM 3025: Anclaje y sujecion
-  FAM 3026: Material metalico
-SEG 31: Fabricacion de Piezas y Partes de Repuesto
-  FAM 3110: Fundicion
-  FAM 3111: Extrusion
-  FAM 3112: Maquinado
-  FAM 3113: Forja
-  FAM 3114: Moldeo de plastico
-  FAM 3115: Productos de torcido y cable y cadena y sujetadores
-  FAM 3116: Sujetadores
+SEG 31: Componentes y Suministros de Manufactura
 SEG 32: Componentes y Suministros Electronicos
-  FAM 3210: Circuitos impresos, circuitos integrados y micro ensamblajes
-  FAM 3211: Componentes discretos
-  FAM 3212: Componentes de displays
-  FAM 3213: Componentes de energia
-  FAM 3214: Componentes de sensores
-  FAM 3215: Dispositivos y componentes y accesorios de control de automatizacion
 SEG 39: Componentes, Accesorios y Suministros de Sistemas Electricos e Iluminacion
-  FAM 3911: Iluminacion, artefactos y accesorios
-  FAM 3912: Componentes electricos
-  FAM 3913: Dispositivos de distribucion de energia
-  FAM 3914: Motores y generadores
-  FAM 3915: Dispositivos electricos de proteccion
-  FAM 3916: Electricos de control
-  FAM 3917: Equipo de electricidad
-SEG 40: Distribucion y Acondicionamiento de Fluidos y Gas
-  FAM 4010: Tubos y tuberias
-  FAM 4011: Accesorios de tuberia
-  FAM 4012: Bombas y compresores
-  FAM 4013: Acondicionamiento de fluidos
-  FAM 4014: Valvulas
+SEG 40: Componentes y Equipos para Distribucion y Sistemas de Acondicionamiento
 SEG 41: Equipos y Suministros de Laboratorio, de Medicion, de Observacion y de Pruebas
-  FAM 4110: Equipo de laboratorio y cientifico
-  FAM 4111: Instrumentos de medida, observacion y ensayo
-  FAM 4112: Equipo educativo y artesanal
-  FAM 4113: Equipo de prueba e inspeccion industrial
-  FAM 4114: Equipo de pruebas de proyectiles y misiles
 SEG 42: Equipo Medico, Accesorios y Suministros
-  FAM 4210: Equipo diagnostico
-  FAM 4211: Equipo terapeutico
-  FAM 4212: Suministros medicos
-  FAM 4213: Instrumentos medicos
-  FAM 4214: Productos y ropa medicos
-  FAM 4215: Suministros de laboratorio medico
-  FAM 4216: Suministros dentales
-  FAM 4217: Productos para los servicios medicos de urgencias y campo
-  FAM 4218: Suministros medicos de esterilizacion
-  FAM 4219: Equipo de control ambiental
-  FAM 4220: Productos de ortopedia y protesis
-  FAM 4221: Ayudas para discapacitados
-  FAM 4222: Cuidado de pacientes
-  FAM 4224: Farmacia
-  FAM 4227: Productos de resucitacion, anestesia y respiratorio
-  FAM 4228: Productos de rehabilitacion
 SEG 43: Difusion de Tecnologias de Informacion y Telecomunicaciones
-  FAM 4319: Dispositivos de comunicaciones y accesorios
-  FAM 4320: Componentes para tecnologia de la informacion, difusion o telecomunicaciones
-  FAM 4321: Equipo informatico y accesorios
-  FAM 4322: Equipos o plataformas y accesorios de redes multimedia o de voz y datos
-  FAM 4323: Software
-SEG 44: Equipos y Suministros de Oficina
-  FAM 4410: Maquinaria y equipos de oficina
-  FAM 4411: Suministros de oficina
-  FAM 4412: Suministros y materiales artesanales y de representacion
-SEG 45: Imprenta, Publicacion y Artes Graficas
-  FAM 4510: Maquinaria de impresion y publicacion
-  FAM 4511: Arte grafico
-SEG 46: Defensa, Orden Publico, Proteccion y Seguridad
-  FAM 4610: Armas y municiones
-  FAM 4611: Componentes de armas y accesorios
-  FAM 4612: Equipo de defensa
-  FAM 4613: Equipo de orden publico
-  FAM 4614: Equipo de proteccion y control de acceso
-  FAM 4615: Equipo de salvamento
-  FAM 4616: Ropa de seguridad y proteccion
-  FAM 4617: Equipo de extincion y control de incendios
-  FAM 4618: Equipo de seguridad de emergencia
-  FAM 4619: Balizas
-SEG 47: Limpieza y Mantenimiento de Instalaciones
-  FAM 4710: Quimicos de limpieza
-  FAM 4711: Suministros de limpieza
-  FAM 4712: Equipos de limpieza
-  FAM 4713: Equipos de jardineria y paisajismo
-  FAM 4714: Suministros de control de plagas
-SEG 48: Servicios de Industrias Especificas
-  FAM 4810: Servicios de educacion y formacion
-  FAM 4811: Servicios de salud
-  FAM 4812: Servicios de finanzas y seguros
-  FAM 4813: Servicios de transporte
-  FAM 4814: Servicios de bienes raices
-SEG 49: Deportes y Recreacion
-  FAM 4910: Equipo deportivo
-  FAM 4911: Juguetes y juegos
-  FAM 4912: Arte y artesanias
-  FAM 4913: Equipo de caza y pesca
-  FAM 4914: Acampada y aventura al aire libre
-SEG 50: Alimentos y Bebidas
-  FAM 5010: Alimentos
-  FAM 5011: Bebidas
-  FAM 5012: Alimentos para animales
-SEG 51: Drogas y Productos Farmaceuticos
-  FAM 5110: Medicamentos
-  FAM 5111: Suplementos nutricionales
-  FAM 5112: Agentes de diagnostico
-SEG 52: Muebles, Accesorios de Hogar y del Comercio, Electrodomesticos y Equipos Electronicos de Consumo
-  FAM 5210: Muebles y accesorios
-  FAM 5211: Accesorios de hogar y del comercio
-  FAM 5212: Electrodomesticos
-  FAM 5213: Equipos electronicos de consumo
-SEG 53: Ropa, Maletas y Productos Personales
-  FAM 5310: Ropa
-  FAM 5311: Accesorios de ropa
-  FAM 5312: Maletas y bolsas
-  FAM 5313: Productos de higiene y aseo personal
-  FAM 5314: Joyeria
-SEG 54: Instrumentos Musicales
-  FAM 5410: Instrumentos musicales
-SEG 55: Publicaciones Impresas, Grabaciones y Medios de Comunicacion
-  FAM 5510: Publicaciones impresas
-  FAM 5511: Grabaciones y medios
-SEG 56: Muebles, Accesorios de Hogar y del Comercio y Equipos Electronicos de Consumo de Segunda Mano
-  FAM 5610: Muebles de segunda mano
-SEG 60: Construccion y Estructuras y Obras Civiles de Segunda Mano
-  FAM 6010: Estructuras prefabricadas
-SEG 70: Servicios de Granjas y Jardines y Silvicultura y Vida Silvestre
-  FAM 7010: Servicios agricolas
-  FAM 7011: Servicios de silvicultura
-  FAM 7012: Servicios de pesca y caza
-  FAM 7013: Servicios de vida silvestre
-SEG 71: Servicios de Mineria y Perforacion de Pozos Petroleros y Gas
-  FAM 7110: Servicios de mineria
-  FAM 7111: Servicios de pozos de petroleo y gas
-SEG 72: Servicios de Construccion y Mantenimiento
-  FAM 7210: Servicios de construccion
-  FAM 7211: Servicios de mantenimiento y reparacion
-  FAM 7212: Servicios de demolicion
-SEG 73: Servicios de Produccion Industrial
-  FAM 7310: Servicios de manufactura
-  FAM 7311: Servicios de produccion
-SEG 76: Servicios de Limpieza Industrial
-  FAM 7610: Servicios de limpieza
+SEG 44: Equipos de Oficina, Accesorios y Suministros
+SEG 45: Equipos y Suministros para Impresion, Fotografia y Audiovisuales
+SEG 46: Equipos y Suministros de Defensa, Orden Publico, Proteccion, Vigilancia y Seguridad
+SEG 47: Equipos de Limpieza y Suministros
+SEG 48: Maquinaria, Equipo y Suministros para la Industria de Servicios
+SEG 49: Equipos, Suministros y Accesorios para Deportes y Recreacion
+SEG 50: Alimentos, Bebidas y Tabaco
+SEG 52: Articulos Domesticos, Suministros y Productos Electronicos de Consumo
+SEG 53: Ropa, Maletas y Productos de Aseo Personal
+SEG 54: Productos para Relojeria, Joyeria y Piedras Preciosas
+SEG 55: Publicaciones Impresas, Publicaciones Electronicas y Accesorios
+SEG 56: Muebles, Mobiliario y Decoracion
+SEG 60: Instrumentos Musicales, Juegos, Juguetes, Artes, Artesanias y Equipo educativo, Materiales, Accesorios y Suministros
+SEG 70: Servicios de Contratacion Agricola, Pesquera, Forestal y de Fauna
+SEG 71: Servicios de Mineria, Petroleo y Gas
+SEG 72: Servicios de Edificacion, Construccion de Instalaciones y Mantenimiento
+SEG 73: Servicios de Produccion Industrial y Manufactura
+SEG 76: Servicios de Limpieza, Descontaminacion y Tratamiento de Residuos
 SEG 77: Servicios Medioambientales
-  FAM 7710: Servicios de gestion de residuos
-  FAM 7711: Servicios de descontaminacion
-SEG 78: Servicios de Transporte y Almacenamiento
-  FAM 7810: Servicios de transporte
-  FAM 7811: Servicios de almacenamiento
-SEG 80: Servicios de Gestion, Asesoria Empresarial y Profesionales
-  FAM 8010: Servicios de gestion empresarial
-  FAM 8011: Servicios de recursos humanos
-  FAM 8012: Servicios juridicos
-  FAM 8013: Servicios informaticos
-SEG 81: Servicios de Ingenieria, Investigacion y Tecnologia
-  FAM 8110: Servicios de ingenieria
-  FAM 8111: Servicios de investigacion y desarrollo
-  FAM 8112: Servicios de calidad
-SEG 82: Servicios Editoriales, de Diseno Grafico y de Bellas Artes
-  FAM 8210: Servicios editoriales
-  FAM 8211: Servicios de diseno
-SEG 83: Servicios de Informacion
-  FAM 8310: Servicios de informacion y difusion
+SEG 78: Servicios de Transporte, Almacenaje y Correo
+SEG 80: Servicios de Gestion, Servicios Profesionales de Empresa y Servicios Administrativos
+SEG 81: Servicios Basados en Ingenieria, Investigacion y Tecnologia
+SEG 82: Servicios Editoriales, de Diseño, de Artes Graficas y Bellas Artes
+SEG 83: Servicios Publicos y Servicios Relacionados con el Sector Publico
 SEG 84: Servicios Financieros y de Seguros
-  FAM 8410: Servicios financieros
-  FAM 8411: Servicios de seguros
-SEG 85: Servicios de Educacion y Formacion
-  FAM 8510: Servicios de educacion
-  FAM 8511: Servicios de formacion
-SEG 86: Servicios de Politica, Sociales, Comunitarios y Personales
-  FAM 8610: Servicios sociales
-  FAM 8611: Servicios comunitarios
-SEG 90: Servicios de Soporte Politico y Asuntos Publicos
-  FAM 9010: Servicios gubernamentales
-SEG 91: Defensa y Seguridad Nacional y Orden Publico
-  FAM 9110: Servicios de defensa
-SEG 92: Organizaciones Benevolentes y Humanitarias
-  FAM 9210: Servicios humanitarios
-SEG 93: Politica y Asuntos de Comercio Exterior
-  FAM 9310: Servicios de comercio
-SEG 94: Organizaciones y Afiliaciones
-  FAM 9410: Servicios de organizaciones`;
+SEG 85: Servicios de Salud
+SEG 86: Servicios Educativos y de Formacion
+SEG 90: Servicios de Viajes, Alimentacion, Alojamiento y Entretenimiento
+SEG 91: Servicios Personales y Domesticos
+SEG 92: Servicios de Defensa Nacional, Orden Publico, Seguridad y Vigilancia
+SEG 93: Servicios Politicos y de Asuntos Civicos
+SEG 94: Organizaciones y Clubes
+SEG 95: Terrenos, Edificios, Estructuras y Vias`;
+
+// Familias por segmento para resolver familias en el servidor (fallback)
+const FAMILIES_BY_SEG = {"10":{"1013":"Recipientes y habitat para animales","1014":"Productos de talabarteria y arreo","1017":"Fertilizantes y nutrientes para plantas y herbicidas","1019":"Productos para el control de plagas"},"11":{"1110":"Minerales, minerales metalicos y metales","1111":"Tierra y piedra","1112":"Productos no comestibles de planta y silvicultura","1114":"Chatarra y materiales de desecho","1115":"Fibra, hilos e hilados","1116":"Tejidos y materiales de cuero","1117":"Aleaciones","1118":"oxido metalico","1119":"Desechos metalicos y chatarra"},"12":{"1213":"Materiales explosivos","1214":"Elementos y gases","1216":"Aditivos","1217":"Colorantes","1218":"Ceras y aceites","1219":"Solventes","1235":"Compuestos y mezclas"},"13":{"1310":"Caucho y elastomeros","1311":"Resinas y colofonias y otros materiales derivados de resina"},"14":{"1410":"Materiales de papel","1411":"Productos de papel","1412":"Papel para uso industrial"},"15":{"1510":"Combustibles","1511":"Combustibles gaseosos y aditivos","1512":"Lubricantes, aceites, grasas y anticorrosivos","1513":"Combustible para reactores nucleares"},"20":{"2010":"Maquinaria y equipo de mineria y explotacion de canteras","2011":"Equipo de perforacion y explotacion de pozos","2012":"Equipo para perforacion y exploracion de petroleo y gas","2013":"Materiales para  perforacion y operaciones de petroleo y gas","2014":"Equipo de produccion y operacion de petroleo y gas"},"21":{"2110":"Maquinaria y equipo para agricultura, silvicultura y paisajismo","2111":"Equipo de pesca y acuicultura"},"22":{"2210":"Maquinaria y equipo pesado de construccion"},"23":{"2310":"Maquinaria para el procesamiento de materias primas","2311":"Maquinaria para el procesamiento de petroleo","2312":"Maquinaria y accesorios de textiles y tejidos","2313":"Maquinaria y equipos lapidarios","2314":"Maquinaria de reparacion y accesorios para marroquineria","2315":"Maquinaria, equipo y suministros de procesos industriales","2316":"Maquinas, equipo y suministros para fundicion","2318":"Equipo industrial para alimentos y bebidas","2319":"Mezcladores y sus partes y accesorios","2320":"Equipamiento para transferencia de masa","2321":"Maquinaria de fabricacion electronica, equipo y accesorios","2322":"Equipo y maquinaria de procesamiento de pollos","2323":"Equipo y maquinaria de procesamiento de madera y aserrado","2324":"Maquinaria y accesorios para cortar metales","2325":"Maquinaria y accesorios para el formado de metales","2326":"Maquinaria y accesorios para hacer prototipos rapidos","2327":"Maquinaria y accesorios y suministros para soldadura de todas las clases","2328":"Maquinaria para el tratamiento de metal","2329":"Herramientas de maquinado industrial","2330":"Maquinaria y equipo para cable"},"24":{"2410":"Maquinaria y equipo para manejo de materiales","2411":"Recipientes y almacenamiento","2412":"Materiales de empaque","2413":"Refrigeracion industrial","2414":"Suministros de embalaje"},"25":{"2510":"Vehiculos de motor","2512":"Maquinaria y equipo para ferrocarril y tranvias","2516":"Bicicletas no motorizadas","2517":"Componentes y sistemas de transporte","2518":"Carrocerias y remolques","2519":"Equipo para servicios de transporte"},"26":{"2610":"Fuentes de energia","2611":"Baterias y generadores y transmision de energia cinetica","2612":"Alambres, cables y arneses","2613":"Generacion de energia","2614":"Maquinaria y equipo para energia atomica o nuclear"},"27":{"2711":"Herramientas de mano","2712":"Maquinaria y equipo hidraulico","2713":"Maquinaria y equipo neumatico","2714":"Herramientas especializadas automotrices"},"30":{"3010":"Componentes estructurales y formas basicas","3011":"Hormigon, cemento y yeso","3012":"Carreteras y paisaje","3013":"Productos de construccion estructurales","3014":"Aislamiento","3015":"Materiales para acabado de exteriores","3016":"Materiales de acabado de interiores","3017":"Puertas y ventanas y vidrio","3018":"Instalaciones de plomeria","3019":"Equipo de apoyo para Construccion y Mantenimiento","3024":"Componentes de construccion de estructura portatil","3025":"Estructuras y materiales de mineria subterranea","3026":"Materiales estructurales"},"31":{"3110":"Piezas de fundicion y ensambles de piezas de fundicion","3111":"Extrusiones","3112":"Piezas fundidas maquinadas","3113":"Forjaduras","3114":"Molduras","3115":"Cuerda, cadena, cable, alambre y correa","3116":"Ferreteria","3117":"Rodamientos, cojinetes ruedas y engranajes","3118":"Empaques, glandulas, fundas y cubiertas","3119":"Materiales de afilado pulido y alisado","3120":"Adhesivos y selladores","3121":"Pinturas y bases y acabados","3122":"Extractos de teñir y de curtir","3123":"Materia prima en placas o barras labradas","3124":"optica industrial","3125":"Sistemas de control neumatico, hidraulico o electrico","3126":"Cubiertas, cajas y envolturas","3127":"Piezas hechas a maquina","3128":"Componentes de placa y estampados","3129":"Extrusiones maquinadas","3130":"Forjas labradas","3131":"Ensambles de tuberia fabricada","3132":"Ensambles fabricados de material en barras","3133":"Ensambles estructurales fabricados","3134":"Ensambles de lamina fabricado","3135":"Ensambles de tuberia fabricada","3136":"Ensambles de placa fabricados","3137":"Refractarios","3139":"Maquinados","3140":"Empaques","3141":"Sellos","3142":"Partes sinterizadas"},"32":{"3210":"Circuitos impresos, circuitos integrados y micro ensamblajes","3211":"Dispositivo semiconductor discreto","3212":"Componentes pasivos discretos","3213":"Piezas de componentes y hardware electronicos y accesorios","3214":"Dispositivos de tubo electronico y accesorios","3215":"Dispositivos y componentes y accesorios de control de automatizacion"},"39":{"3910":"Lamparas y bombillas y componentes para lamparas","3911":"Iluminacion, artefactos y accesorios","3912":"Equipos, suministros y componentes electricos","3913":"Dispositivos y accesorios y suministros de manejo de cable electrico"},"40":{"4010":"Calefaccion, ventilacion y circulacion del aire","4014":"Distribucion de fluidos y gas","4015":"Bombas y compresores industriales","4016":"Filtrado y purificacion industrial","4017":"Instalaciones de tubos y entubamientos","4018":"Instalaciones de tubos y tuberias"},"41":{"4110":"Equipo de laboratorio y cientifico","4111":"Instrumentos de medida, observacion y ensayo","4112":"Suministros y accesorios de laboratorio"},"42":{"4213":"Telas y vestidos medicos","4214":"Suministros, productos de tratamiento y cuidado del enfermo","4217":"Productos para los servicios medicos de urgencias y campo","4219":"Productos de centro medico","4227":"Productos de resucitacion, anestesia y respiratorio","4228":"Productos para la esterilizacion medica","4230":"Suministros para formacion y estudios de medicina","4231":"Productos para el cuidado de heridas"},"43":{"4319":"Dispositivos de comunicaciones y accesorios","4320":"Componentes para tecnologia de la informacion, difusion o telecomunicaciones","4321":"Equipo informatico y accesorios","4322":"Equipos o plataformas y accesorios de redes multimedia o de voz y datos","4323":"Software"},"44":{"4410":"Maquinaria, suministros y accesorios de oficina","4411":"Accesorios de oficina y escritorio","4412":"Suministros de oficina"},"45":{"4510":"Equipo de imprenta y publicacion","4511":"Equipos de audio y video para presentacion y composicion","4512":"Equipo de video, filmacion o fotografia","4513":"Medios fotograficos y de grabacion","4514":"Suministros fotograficos para cine"},"46":{"4610":"Armas ligeras y municion","4611":"Armas de guerra convencionales","4612":"Misiles","4613":"Cohetes y subsistemas","4614":"Lanzadores","4615":"Proteccion del Orden Publico","4616":"Seguridad y control publico","4617":"Seguridad, vigilancia y deteccion","4618":"Seguridad y proteccion personal","4619":"Proteccion contra incendios","4620":"Equipo de entrenamiento de seguridad fisica e industrial, defensa y orden publico"},"47":{"4710":"Tratamiento, suministros y eliminacion de agua y aguas residuales","4711":"Equipo industrial de lavanderia y lavado en seco","4712":"Equipo de aseo","4713":"Suministros de aseo y limpieza"},"48":{"4810":"Equipos de servicios de alimentacion para instituciones","4811":"Maquinas expendedoras","4812":"Equipo de Juego o de Apostar","4813":"Equipo y materiales funerarios"},"49":{"4910":"Coleccionables y condecoraciones","4912":"Equipos y accesorios para acampada y exteriores","4916":"Equipos deportivos para campos y canchas","4917":"Equipos de gimnasia y boxeo","4918":"Juegos, equipo de tiro y mesa","4920":"Equipo para entrenamiento fisico","4922":"Equipo  y accesorios para deportes","4924":"Equipo de recreo, parques infantiles y equipo y suministros de natacion y de spa"},"50":{"5013":"Productos lacteos y huevos","5015":"Aceites y grasas comestibles","5016":"Chocolates, azucares, edulcorantes y productos de confiteria","5019":"Alimentos preparados y conservados","5020":"Bebidas"},"52":{"5210":"Revestimientos de suelos","5212":"Ropa de cama, mantelerias, paños de cocina y toallas","5213":"Tratamientos de ventanas","5214":"Aparatos electrodomesticos","5215":"Utensilios de cocina domesticos","5216":"Electronica de consumo","5217":"Tratamientos de pared domestica"},"53":{"5310":"Ropa","5311":"Calzado","5312":"Maletas, bolsos de mano, mochilas y estuches","5313":"Articulos de tocador y cuidado personal","5314":"Fuentes y accesorios de costura"},"54":{"5411":"Relojes","5412":"Gemas"},"55":{"5510":"Medios impresos","5511":"Material electronico de referencia","5512":"Etiquetado y accesorios"},"56":{"5610":"Muebles de alojamiento","5611":"Muebles comerciales e industriales","5612":"Mobiliario institucional, escolar y educativo y accesorios","5613":"Muebles y accesorios para merchandising","5614":"Adornos para el hogar"},"60":{"6010":"Materiales didacticos profesionales y de desarrollo y accesorios y suministros","6011":"Decoraciones y suministros del aula","6012":"Equipo, accesorios y suministros de arte y manualidades","6013":"Instrumentos musicales, piezas y accesorios","6014":"Juguetes y juegos"},"70":{"7010":"Pesquerias y acuicultura","7011":"Horticultura","7012":"Servicios de animales vivos","7013":"Preparacion, gestion y proteccion del terreno y del suelo","7014":"Produccion, gestion y proteccion de cultivos","7015":"Silvicultura","7016":"Fauna y flora silvestres","7017":"Desarrollo y vigilancia de recursos hidraulicos"},"71":{"7110":"Servicios de mineria","7111":"Servicios de perforacion y prospeccion petrolifera y de gas","7112":"Servicios de construccion y perforacion de pozos","7113":"Servicios de aumento de la extraccion y produccion de gas y petroleo","7114":"Servicios de restauracion y recuperacion de gas y petroleo","7115":"Servicios de procesamiento y gestion de datos de petroleo y gas","7116":"Servicios de gerencia de proyectos en pozos de petroleo y gas"},"72":{"7210":"Servicios de mantenimiento y reparaciones de construcciones e instalaciones","7211":"Servicios de construccion de edificaciones residenciales","7212":"Servicios de construccion de edificaciones no residenciales","7214":"Servicios de construccion pesada","7215":"Servicios de mantenimiento y construccion de comercio especializado"},"73":{"7310":"Industrias de plasticos y productos quimicos","7311":"Industrias de la madera y el papel","7312":"Industrias del metal y de minerales","7313":"Industrias de alimentos y bebidas","7314":"Industrias de fibras, textiles y de tejidos","7315":"Servicios de apoyo a la fabricacion","7316":"Fabricacion de maquinaria y equipo de transporte","7317":"Fabricacion de productos electricos e instrumentos de precision","7318":"Servicios de maquinado y procesado"},"76":{"7610":"Servicios de descontaminacion","7611":"Servicios de aseo y limpieza","7612":"Eliminacion y tratamiento de desechos","7613":"Limpieza de residuos toxicos y peligrosos"},"77":{"7710":"Gestion medioambiental","7711":"Proteccion medioambiental","7712":"Seguimiento, control y rehabilitacion de la contaminacion","7713":"Servicios de seguimiento, control o rehabilitacion de contaminantes"},"78":{"7810":"Transporte de correo y carga","7811":"Transporte de pasajeros","7812":"Manejo y embalaje de material","7813":"Almacenaje","7814":"Servicios de transporte","7818":"Servicios de mantenimiento o reparaciones de transportes"},"80":{"8010":"Servicios de asesoria de gestion","8011":"Servicios de recursos humanos","8012":"Servicios legales","8013":"Servicios inmobiliarios","8014":"Comercializacion y distribucion","8015":"Politica comercial y servicios","8016":"Servicios de administracion de empresas"},"81":{"8110":"Servicios profesionales de ingenieria","8111":"Servicios informaticos","8112":"Economia","8113":"Estadistica","8114":"Tecnologias de fabricacion","8115":"Servicios de pedologia","8116":"Entrega de servicios de tecnologia de informacion"},"82":{"8210":"Publicidad","8211":"Escritura y traducciones","8212":"Servicios de reproduccion","8213":"Servicios fotograficos","8214":"Diseño grafico","8215":"Artistas e interpretes profesionales"},"83":{"8310":"Servicios publicos","8311":"Servicios de medios de telecomunicaciones","8312":"Servicios de informacion"},"84":{"8410":"Finanzas de desarrollo","8411":"Servicios de contabilidad y auditorias","8412":"Banca e inversiones","8413":"Servicios de seguros y pensiones","8414":"Agencias de credito"},"85":{"8510":"Servicios integrales de salud","8511":"Prevencion y control de enfermedades","8512":"Practica medica","8513":"Ciencia medica, investigacion y experimentacion","8514":"Medicina alternativa y holistica","8515":"Servicios alimenticios y de nutricion","8516":"Servicios de mantenimiento, renovacion y reparacion de equipo medico quirurgico","8517":"Servicios de muerte y soporte al fallecimiento"},"86":{"8610":"Formacion profesional","8611":"Sistemas educativos alternativos","8612":"Instituciones educativas","8613":"Servicios educativos especializados","8614":"Instalaciones educativas"},"90":{"9010":"Restaurantes y catering (servicios de comidas y bebidas)","9011":"Instalaciones hoteleras, alojamientos y centros de encuentros","9012":"Facilitacion de viajes","9013":"Artes interpretativas","9014":"Deportes comerciales","9015":"Servicios de entretenimiento"},"91":{"9110":"Aspecto personal","9111":"Asistencia domestica y personal"},"92":{"9210":"Orden publico y seguridad","9211":"Servicios militares o defensa nacional","9212":"Seguridad y proteccion personal"},"93":{"9310":"Sistemas e instituciones politicas","9311":"Condiciones sociopoliticas","9312":"Relaciones internacionales","9313":"Ayuda y asistencia humanitaria","9314":"Servicios comunitarios y sociales","9315":"Servicios de administracion y financiacion publica","9316":"Tributacion","9317":"Politica y regulacion comercial"},"94":{"9410":"Organizaciones laborales","9411":"Organizaciones religiosas","9412":"Clubes","9413":"Organizaciones, asociaciones y movimientos civicos"},"95":{"9510":"Parcelas de tierra","9511":"Vias","9512":"Estructuras y edificios permanentes","9513":"Estructuras y edificios moviles","9514":"Estructuras y edificios prefabricados"}};
 
 async function callAnthropic(messages, systemPrompt) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -315,7 +84,7 @@ async function callAnthropic(messages, systemPrompt) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 1000,
+      max_tokens: 500,
       system: systemPrompt,
       messages
     })
@@ -327,35 +96,41 @@ async function callAnthropic(messages, systemPrompt) {
   return res.json();
 }
 
-// Paso 1: identificar las TOP 3 familias UNSPSC
-async function getTopFamilies(denominacion) {
-  const system = `Eres un experto en clasificación UNSPSC. Se te dará una denominación de material o producto y debes identificar las 3 familias UNSPSC más probables de la jerarquía proporcionada.
-
-JERARQUÍA UNSPSC (Segmentos → Familias):
-${HIERARCHY_TEXT}
-
-Responde ÚNICAMENTE con un JSON válido en este formato exacto, sin texto adicional:
-{"families":["XXXX","YYYY","ZZZZ"]}
-
-Donde cada valor es el código de 4 dígitos de una familia UNSPSC.
-Ordena las familias de más a menos probable.`;
-
-  const data = await callAnthropic([
-    { role: 'user', content: `Clasifica este material: ${denominacion}` }
-  ], system);
-
-  const raw = data.content[0].text.trim();
-  const clean = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-  // Extraer el primer objeto JSON completo
+function parseJSON(text) {
+  const clean = text.trim().replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
   const match = clean.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('No se encontró JSON válido en la respuesta de la IA.');
-  const parsed = JSON.parse(match[0]);
-  return parsed.families || [];
+  return JSON.parse(match[0]);
 }
 
-// Paso 2: identificar el código exacto dentro de las familias seleccionadas
+// Paso 1: IA identifica los TOP 2 segmentos UNSPSC
+async function getTopSegments(denominacion) {
+  const system = `Eres un experto en clasificación UNSPSC. Dado un material industrial, identifica los 2 segmentos UNSPSC más probables de esta lista de 55 segmentos.
+
+SEGMENTOS UNSPSC:
+${SEGMENTS_TEXT}
+
+INSTRUCCIONES:
+- Analiza la función principal del material, no su nombre literal.
+- Ignora marcas comerciales, números de parte y especificaciones técnicas.
+- El primer segmento debe ser el más probable.
+- Si el material claramente pertenece a un solo segmento, repite ese segmento dos veces.
+
+Responde ÚNICAMENTE con JSON válido, sin texto adicional:
+{"segments":["XX","YY"]}
+
+Donde XX e YY son códigos de 2 dígitos de la lista.`;
+
+  const data = await callAnthropic([
+    { role: 'user', content: `Material: ${denominacion}` }
+  ], system);
+
+  const parsed = parseJSON(data.content[0].text);
+  return parsed.segments || [];
+}
+
+// Paso 2: IA identifica el código exacto entre los productos de las familias
 async function getExactCode(denominacion, familyProducts) {
-  // Construir lista de productos de las familias
   let productList = '';
   for (const [famCode, products] of Object.entries(familyProducts)) {
     productList += `\n--- Familia ${famCode} ---\n`;
@@ -364,54 +139,49 @@ async function getExactCode(denominacion, familyProducts) {
     }
   }
 
-  const system = `Eres un experto en clasificación UNSPSC. Se te dará una denominación de material y una lista de códigos de producto UNSPSC. Debes identificar el código más preciso.
+  const system = `Eres un experto en clasificación UNSPSC. Clasifica el material en el código más preciso de esta lista.
 
-LISTA DE PRODUCTOS UNSPSC:
+PRODUCTOS UNSPSC DISPONIBLES:
 ${productList}
 
-Responde ÚNICAMENTE con un JSON válido en este formato exacto, sin texto adicional:
+INSTRUCCIONES:
+- Elige el código que mejor represente la función principal del material.
+- Ignora marcas, números de parte y especificaciones técnicas.
+- Si ningún código es exacto, elige el más cercano con confianza BAJA.
+- Incluye máximo 2 alternativas relevantes.
+
+Responde ÚNICAMENTE con JSON válido, sin texto adicional:
 {
   "codigo": "XXXXXXXX",
   "nombre": "Nombre del producto UNSPSC",
   "confianza": "ALTA|MEDIA|BAJA",
-  "razon": "Breve explicación de por qué este código es el más adecuado",
+  "razon": "Breve justificación en máximo 12 palabras",
   "alternativas": [
-    {"codigo": "XXXXXXXX", "nombre": "Nombre alternativo", "confianza": "MEDIA"}
+    {"codigo": "XXXXXXXX", "nombre": "Nombre", "confianza": "MEDIA"}
   ]
-}
-
-Si ningún código corresponde con precisión, elige el más cercano y usa confianza BAJA.
-Incluye máximo 2 alternativas relevantes.`;
+}`;
 
   const data = await callAnthropic([
-    { role: 'user', content: `Clasifica este material: ${denominacion}` }
+    { role: 'user', content: `Material: ${denominacion}` }
   ], system);
 
-  const raw = data.content[0].text.trim();
-  const clean = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-  // Extraer el primer objeto JSON completo
-  const match = clean.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('No se encontró JSON válido en la respuesta de la IA.');
-  return JSON.parse(match[0]);
+  return parseJSON(data.content[0].text);
 }
 
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Método no permitido' });
-    return;
+    return res.status(405).json({ error: 'Método no permitido' });
   }
 
   const username = getSessionUser(req);
   if (!username) {
-    res.status(401).json({ error: 'Sesión no autenticada o expirada.' });
-    return;
+    return res.status(401).json({ error: 'Sesión no autenticada o expirada.' });
   }
 
   if (!ANTHROPIC_KEY) {
-    res.status(500).json({ error: 'Falta ANTHROPIC_API_KEY en el servidor.' });
-    return;
+    return res.status(500).json({ error: 'Falta ANTHROPIC_API_KEY en el servidor.' });
   }
 
   let body = req.body;
@@ -420,24 +190,22 @@ module.exports = async (req, res) => {
   }
 
   const { denominacion, familyProducts } = body || {};
-
   if (!denominacion) {
-    res.status(400).json({ error: 'Falta el campo denominacion.' });
-    return;
+    return res.status(400).json({ error: 'Falta el campo denominacion.' });
   }
 
   try {
     if (!familyProducts) {
-      // PASO 1: Identificar las top 3 familias
-      const families = await getTopFamilies(denominacion);
-      res.status(200).json({ step: 'families', families });
+      // PASO 1: identificar top 2 segmentos
+      const segs = await getTopSegments(denominacion);
+      return res.status(200).json({ step: 'segments', segments: segs });
     } else {
-      // PASO 2: Identificar el código exacto
+      // PASO 2: identificar código exacto
       const result = await getExactCode(denominacion, familyProducts);
-      res.status(200).json({ step: 'result', result });
+      return res.status(200).json({ step: 'result', result });
     }
   } catch (e) {
     console.error('[CLASIFICAR]', e.message);
-    res.status(500).json({ error: e.message || 'Error interno del servidor.' });
+    return res.status(500).json({ error: e.message || 'Error interno del servidor.' });
   }
 };
