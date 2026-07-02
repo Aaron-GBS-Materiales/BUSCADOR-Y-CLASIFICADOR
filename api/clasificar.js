@@ -344,7 +344,8 @@ Ordena las familias de más a menos probable.`;
     { role: 'user', content: `Clasifica este material: ${denominacion}` }
   ], system);
 
-  const text = data.content[0].text.trim();
+  const raw = data.content[0].text.trim();
+  const text = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
   const parsed = JSON.parse(text);
   return parsed.families || [];
 }
@@ -383,7 +384,8 @@ Incluye máximo 2 alternativas relevantes.`;
     { role: 'user', content: `Clasifica este material: ${denominacion}` }
   ], system);
 
-  const text = data.content[0].text.trim();
+  const raw = data.content[0].text.trim();
+  const text = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
   return JSON.parse(text);
 }
 
