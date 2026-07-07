@@ -253,9 +253,12 @@ module.exports = async (req, res) => {
     return res.status(401).json({ error: 'Sesión no autenticada o expirada.' });
   }
 
-  if (!ANTHROPIC_KEY) {
-    return res.status(500).json({ error: 'Falta ANTHROPIC_API_KEY en el servidor.' });
-  }
+if (!ANTHROPIC_KEY) {
+    return res.status(500).json({ 
+        error: 'Falta ANTHROPIC_API_KEY en el servidor.',
+        vars_disponibles: Object.keys(process.env).filter(k => k.includes('ANTHROPIC'))
+    });
+}
 
   let body = req.body;
   if (typeof body === 'string') {
