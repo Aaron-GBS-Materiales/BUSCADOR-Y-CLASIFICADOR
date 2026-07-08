@@ -534,10 +534,10 @@ REGLAS DE CLASIFICACIÓN:
   * HERRAMIENTA = LLAVE = ALICATE → FAM 2711
   * EPP = CASCO = GUANTES = ARNES → FAM 4618
 - El primer elemento debe ser la familia MÁS probable.
-- Incluye siempre exactamente 3 familias.
+- Incluye siempre exactamente 2 familias.
 
 FORMATO — responde ÚNICAMENTE con JSON válido, sin markdown:
-{"families":["XXXX","YYYY","ZZZZ"]}
+{"families":["XXXX","YYYY"]}
 
 LISTA COMPLETA DE 333 FAMILIAS UNSPSC:
 ${ALL_FAMILIES_TEXT}`
