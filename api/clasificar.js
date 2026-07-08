@@ -145,17 +145,19 @@ async function getTopSegments(denominacion, bulk = false) {
     systemBlocks: [
       {
         type: 'text',
-        text: `Eres un experto en clasificación UNSPSC. Dado un material, identifica los 2 segmentos más probables.
+        text: `Eres un experto en clasificación UNSPSC para industria minera, eléctrica, mecánica e instrumentación. Dado un material o producto, identifica los 2 segmentos UNSPSC más probables de la lista proporcionada.
 
-INSTRUCCIONES:
-- Analiza la FUNCIÓN PRINCIPAL del material, no su nombre literal.
-- Ignora marcas comerciales, números de parte y especificaciones técnicas.
-- Si el material claramente pertenece a un solo segmento, repítelo dos veces.
+INSTRUCCIONES DE CLASIFICACIÓN:
+- Analiza la FUNCIÓN PRINCIPAL del material, no su nombre literal ni su marca comercial.
+- Ignora marcas comerciales (SKF, ABB, Siemens, HP, etc.), números de parte y especificaciones técnicas.
+- Considera sinónimos y modismos industriales regionales.
+- Si el material claramente pertenece a un solo segmento, repite ese segmento dos veces.
+- Prioriza la categoría más específica y representativa de la función del material.
 
-Responde ÚNICAMENTE con JSON válido, sin texto adicional:
+Responde ÚNICAMENTE con JSON válido, sin texto adicional, sin markdown:
 {"segments":["XX","YY"]}
 
-SEGMENTOS UNSPSC DISPONIBLES:
+LISTA COMPLETA DE SEGMENTOS UNSPSC DISPONIBLES:
 ${SEGMENTS_TEXT}`
       }
     ],
@@ -188,15 +190,28 @@ async function getTopFamilies(denominacion, segCodes, bulk = false) {
     systemBlocks: [
       {
         type: 'text',
-        text: `Eres un experto en clasificación UNSPSC. Dado un material y una lista de familias, elige las 3 más probables.
+        text: `Eres un experto en clasificación UNSPSC para industria minera, eléctrica, mecánica, instrumentación y tecnología. Dado un material o producto y una lista de familias UNSPSC, identifica las 3 familias más probables.
 
-INSTRUCCIONES:
-- Elige por la FUNCIÓN del material, no por coincidencia literal de palabras.
-- Ordena de más a menos probable.
-- Responde ÚNICAMENTE con JSON válido, sin texto adicional:
+REGLAS DE CLASIFICACIÓN:
+- Clasifica por la FUNCIÓN PRINCIPAL del material, nunca por coincidencia literal de palabras.
+- Ignora completamente: marcas comerciales, números de parte, especificaciones técnicas, dimensiones.
+- Interpreta sinónimos y equivalencias industriales:
+  * RODAMIENTO = COJINETE = BEARING → buscar en familia de rodamientos
+  * VALVULA = LLAVE DE PASO = GRIFO → buscar en familia de válvulas
+  * MOTOR = MOTOREDUCTOR → buscar en familia de motores
+  * SENSOR = TRANSMISOR = DETECTOR → buscar en familia de instrumentación
+  * LAPTOP = NOTEBOOK = COMPUTADOR PORTATIL → buscar en familia de equipos informáticos
+  * CABLE = CONDUCTOR = ALAMBRE → buscar en familia de alambres y cables
+  * MANGUERA = FLEXIBLE = TUBO → buscar en familia de tuberías
+  * FILTRO = ELEMENTO FILTRANTE → buscar en familia de filtración
+  * COMPRESOR = BOMBA DE AIRE → buscar en familia de bombas y compresores
+- El primer elemento del JSON debe ser la familia MÁS probable.
+- Incluye siempre exactamente 3 familias aunque alguna sea poco probable.
+
+FORMATO DE RESPUESTA — responde ÚNICAMENTE con JSON válido, sin markdown, sin texto adicional:
 {"families":["XXXX","YYYY","ZZZZ"]}
 
-FAMILIAS DISPONIBLES:
+FAMILIAS UNSPSC DISPONIBLES PARA ESTE MATERIAL:
 ${famList}`
       }
     ],
