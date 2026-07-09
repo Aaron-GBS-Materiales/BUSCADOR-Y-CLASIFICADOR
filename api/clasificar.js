@@ -400,7 +400,7 @@ async function getTopFamilies(denominacion, bulk = false) {
     bulk,
     systemText: `Experto UNSPSC. Elige las 2 familias más probables para el material.
 Clasifica por función principal. Ignora marcas, números de parte y especificaciones.
-Equivalencias: RODAMIENTO→3117, VALVULA→4014, MOTOR ELECTRICO→2610, SENSOR/TRANSMISOR→4111, RELE/CONTACTOR/TEMPORIZADOR→3916, BREAKER/DISYUNTOR→3915, CABLE/CONDUCTOR→2612, MANGUERA/FLEXIBLE→4017, FILTRO→4016, BOMBA/COMPRESOR→4015, FUENTE ALIMENTACION→3912, LAPTOP/NOTEBOOK→4321, HERRAMIENTA→2711, EPP/CASCO/ARNES→4618, LUBRICANTE/GRASA→1512, SOLDADURA/ELECTRODO→2327, EMPAQUE/SELLO/ORING→3118, PLACA/TARJETA/PCB→3210.
+Equivalencias: RODAMIENTO→3117, VALVULA→4014, MOTOR ELECTRICO→2610, SENSOR/TRANSMISOR→4111, RELE/CONTACTOR/TEMPORIZADOR→3916, BREAKER/DISYUNTOR→3915, CABLE/CONDUCTOR→2612, MANGUERA/FLEXIBLE→4017, FILTRO→4016, BOMBA/BOMBA COMBUSTIBLE/BOMBA HIDRAULICA/COMPRESOR→4015, FUENTE ALIMENTACION→3912, LAPTOP/NOTEBOOK→4321, HERRAMIENTA→2711, EPP/CASCO/ARNES→4618, LUBRICANTE/GRASA→1512, SOLDADURA/ELECTRODO→2327, EMPAQUE/SELLO/JUNTA/ORING→3118, PLACA/TARJETA/PCB→3210, FUSIBLE→3912, SOLENOIDE→3125.
 JSON: {"families":["XXXX","YYYY"]}
 
 ${ALL_FAMILIES_TEXT}`,
@@ -419,7 +419,7 @@ async function getExactCode(denominacion, familyProducts, bulk = false) {
     .join('\n');
 
   const data = await callAnthropic({
-    bulk,
+    bulk: false,  // Paso 2 nunca cachea — productos distintos por material
     systemText: `Experto UNSPSC. Elige el código más preciso para el material. Clasifica por función principal, ignora marcas y especificaciones. Si no hay exacto, usa el más cercano con confianza BAJA.
 JSON: {"codigo":"XXXXXXXX","nombre":"Nombre UNSPSC","confianza":"ALTA|MEDIA|BAJA","razon":"máx 10 palabras","alternativas":[{"codigo":"XXXXXXXX","nombre":"Nombre","confianza":"MEDIA"}]}
 
